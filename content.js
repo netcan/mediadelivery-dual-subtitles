@@ -47,12 +47,14 @@
       bottom: 9%;
       transform: translateX(-50%);
       width: min(92%, 980px);
-      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
     }
 
     .btc-sub-line {
-      display: inline-block;
+      display: block;
       max-width: 100%;
       margin: 4px auto;
       padding: 6px 12px;
