@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "MediaDelivery Dual Subtitles",
+  "version": "0.1.0",
+  "description": "Display dual subtitles on videos embedded via MediaDelivery.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://iframe.mediadelivery.net/*",
+    "https://*.b-cdn.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://iframe.mediadelivery.net/embed/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "MediaDelivery Dual Subtitles"
+  }
+}
