@@ -404,7 +404,7 @@
 
     const activeCues = item.track?.activeCues ? Array.from(item.track.activeCues) : [];
     if (activeCues.length) {
-      return dedupeLines(activeCues.map((cue) => normalizeCueText(cue.text)).join('\n'));
+      return compactCueSegments(activeCues.map((cue) => normalizeCueText(cue.text)));
     }
 
     const cues = item.track?.cues ? Array.from(item.track.cues) : [];
@@ -541,7 +541,7 @@
       cues.push({
         start,
         end,
-        text: dedupeLines(normalizeCueText(textLines.join('\n'))),
+        text: compactCueSegments(textLines.map((line) => normalizeCueText(line))),
       });
     }
 
@@ -562,16 +562,20 @@
 
   function normalizeCueText(text) {
     return text
-      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, ' ')
       .replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
-  function dedupeLines(text) {
-    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-    return [...new Set(lines)].join('\n');
+  function compactCueSegments(segments) {
+    const parts = segments
+      .flatMap((segment) => String(segment || '').split('\n'))
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    return [...new Set(parts)].join(' ');
   }
 
   function pickTrack(tracks, languages, excludeId) {
