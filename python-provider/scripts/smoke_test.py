@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -49,17 +50,43 @@ def wait_for_health(base_url: str, timeout_sec: float = 10.0):
     raise RuntimeError(f"health check failed: {last_error}")
 
 
-def main():
-    port = os.environ.get("PYTHON_PROVIDER_PORT", "18080")
+def run_smoke(startup_mode: str, port: str):
     base_url = f"http://127.0.0.1:{port}"
     env = os.environ.copy()
-    env["PYTHON_PROVIDER_PORT"] = port
-    env["VOXCPM_ENABLE_MOCK"] = env.get("VOXCPM_ENABLE_MOCK", "1")
-    env["PYTHON_PROVIDER_RESPONSE_MODE"] = env.get("PYTHON_PROVIDER_RESPONSE_MODE", "async")
-    process = subprocess.Popen([sys.executable, str(ROOT / "server.py")], cwd=str(ROOT), env=env)
+    env["VOXCPM_ENABLE_MOCK"] = "1"
+    env["PYTHON_PROVIDER_RESPONSE_MODE"] = "async"
+
+    if startup_mode == "cli":
+        env["PYTHON_PROVIDER_PORT"] = "19999"
+        env["VOXCPM_MODEL_ID"] = "env-model-should-be-overridden"
+        command = [
+            sys.executable,
+            str(ROOT / "server.py"),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            port,
+            "--response-mode",
+            "async",
+            "--model-id",
+            "cli-model",
+            "--enable-mock",
+        ]
+        expected_model_id = "cli-model"
+    else:
+        env["PYTHON_PROVIDER_PORT"] = port
+        env["VOXCPM_MODEL_ID"] = "env-model"
+        command = [sys.executable, str(ROOT / "server.py")]
+        expected_model_id = "env-model"
+
+    process = subprocess.Popen(command, cwd=str(ROOT), env=env)
 
     try:
-        wait_for_health(base_url)
+        health_payload = wait_for_health(base_url)
+        if health_payload.get("modelId") != expected_model_id:
+            raise RuntimeError(
+                f"unexpected model id for {startup_mode}: {health_payload.get('modelId')} != {expected_model_id}"
+            )
         status, capabilities = request_json(f"{base_url}/capabilities")
         if status != 200 or not capabilities.get("voices"):
             raise RuntimeError("capabilities missing voices")
@@ -119,6 +146,7 @@ def main():
             json.dumps(
                 {
                     "ok": True,
+                    "startupMode": startup_mode,
                     "jobId": final_payload.get("jobId"),
                     "audioUrl": final_payload["result"]["audioUrl"],
                 },
@@ -132,6 +160,28 @@ def main():
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Smoke test the Python provider.")
+    parser.add_argument(
+        "--startup-mode",
+        choices=("env", "cli", "both"),
+        default="both",
+        help="Choose env startup, cli startup, or validate both",
+    )
+    parser.add_argument("--port", default="18080", help="Base port used by the smoke test")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    base_port = int(args.port)
+
+    if args.startup_mode in {"env", "both"}:
+        run_smoke("env", str(base_port))
+    if args.startup_mode in {"cli", "both"}:
+        run_smoke("cli", str(base_port + 1))
 
 
 if __name__ == "__main__":

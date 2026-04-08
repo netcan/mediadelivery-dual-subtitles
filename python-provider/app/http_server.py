@@ -246,8 +246,8 @@ def create_server(config=None):
     return httpd, config
 
 
-def run_server():
-    httpd, config = create_server()
+def run_server(config=None):
+    httpd, config = create_server(config=config)
     print(
         f"[python-provider] listening on http://{config.host}:{config.port} using VoxCPM provider -> {config.model_id}"
     )

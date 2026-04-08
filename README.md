@@ -95,7 +95,7 @@ Provider 能力接口至少建议返回：
 - 扩展仍然调用 `POST /jobs`、`GET /jobs/:id`
 - Provider 新增 `GET /capabilities`，用于给前端返回可选音色
 - Python Provider 负责接收中文字幕时间轴、预处理文案、调用 VoxCPM、拼接成单条外挂中文音轨
-- 默认走异步任务模式；如需同步返回，可设置 `LOCAL_PROVIDER_RESPONSE_MODE=sync`
+- 默认走异步任务模式；如需同步返回，可设置 `PYTHON_PROVIDER_RESPONSE_MODE=sync` 或启动时传 `--response-mode sync`
 - 输出文件默认写到 `python-provider/output/`
 - 模型、模型路径和推理参数由 Provider 内部管理
 - 插件前端只保留 `Provider 地址` 和 `音色` 两类关键配置
@@ -122,19 +122,48 @@ python3 -m pip install -r python-provider/requirements.txt
 - `pip install voxcpm`
 - 运行时首次自动下载模型，或提前下载 `openbmb/VoxCPM1.5` / `openbmb/VoxCPM-0.5B`
 
-如果你想显式指定模型，可通过环境变量覆盖，例如：
-
-```bash
-export VOXCPM_MODEL_ID=openbmb/VoxCPM2
-```
+如果你想显式指定模型，可通过命令行参数或环境变量覆盖。
 
 ### 启动 Python Provider
 
-最常用方式：
+推荐直接用命令行参数启动，跨平台更直观：
 
 ```bash
+python3 python-provider/server.py --host 127.0.0.1 --port 8000 --model-id openbmb/VoxCPM2
+```
+
+如果你习惯走 `npm script`，也可以把参数透传给 Python 入口：
+
+```bash
+npm run provider:start -- --host 127.0.0.1 --port 8000 --model-id openbmb/VoxCPM2
+```
+
+常用 CLI 参数：
+
+- `--host`：监听地址，默认 `127.0.0.1`
+- `--port`：Provider 端口，默认 `8000`
+- `--base-url`：对外暴露的 Base URL，可选
+- `--response-mode`：`async` 或 `sync`
+- `--model-id`：VoxCPM 模型名，默认 `openbmb/VoxCPM2`
+- `--default-voice`：默认音色 ID
+- `--cfg-value`：默认 `cfg_value`
+- `--inference-timesteps`：默认 `inference_timesteps`
+- `--output-dir`：输出目录
+- `--load-denoiser` / `--no-load-denoiser`
+- `--preload-model` / `--no-preload-model`
+- `--enable-mock` / `--no-enable-mock`
+
+说明：
+
+- CLI flags 优先级高于环境变量
+- 未显式传入的参数，仍会回退到环境变量或内置默认值
+- 若想让局域网设备访问 Provider，可把 `--host` 改为 `0.0.0.0`
+
+环境变量模式仍然保留，适合长期固定配置，例如：
+
+```bash
+export VOXCPM_MODEL_ID=openbmb/VoxCPM2
 PYTHON_PROVIDER_PORT=8000 \
-VOXCPM_MODEL_ID=openbmb/VoxCPM2 \
 npm run provider:start
 ```
 
@@ -182,6 +211,11 @@ export VOXCPM_VOICE_PRESETS_JSON='{"default":{"label":"默认音色"},"warm":{"l
 npm run provider:smoke
 ```
 
+它默认会连续验证两种启动方式：
+
+- 环境变量启动
+- CLI 参数启动（同时校验 CLI 覆盖环境变量）
+
 它会：
 
 - 启动真实的 `python-provider`
@@ -190,6 +224,13 @@ npm run provider:smoke
 - 发送与扩展一致的 `POST /jobs` 请求
 - 轮询 `GET /jobs/:id`
 - 校验 `audioUrl`、`subtitleUrl` 和音频 `Range` 访问
+
+如果你只想单独验证一种方式，也可以这样运行：
+
+```bash
+python3 python-provider/scripts/smoke_test.py --startup-mode cli
+python3 python-provider/scripts/smoke_test.py --startup-mode env
+```
 
 ## 手工验证清单
 
