@@ -7,8 +7,7 @@
     "storage"
   ],
   "host_permissions": [
-    "https://iframe.mediadelivery.net/*",
-    "https://*.b-cdn.net/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
