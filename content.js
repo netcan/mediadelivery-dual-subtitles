@@ -64,6 +64,8 @@
     dubSyncTimer: null,
     dubbedAudio: null,
     dubbedPreloadAudio: null,
+    dubbedMediaCache: new Map(),
+    dubbedMediaWindow: new Set(),
     savedVideoAudioState: null,
   };
 
@@ -768,6 +770,106 @@
     return {};
   }
 
+  async function requestBinaryMediaViaExtension(url, options = {}) {
+    const response = await chrome.runtime.sendMessage({
+      type: 'fetchBinaryMedia',
+      url,
+      headers: options.headers || {},
+    });
+
+    if (!response) {
+      throw new Error('未收到扩展后台响应。');
+    }
+    if (!response.ok) {
+      throw new Error(response.error || `媒体请求失败（HTTP ${response.status || 'unknown'}）`);
+    }
+    if (typeof response.dataBase64 !== 'string' || !response.dataBase64) {
+      throw new Error('扩展后台未返回可用的音频数据。');
+    }
+    return {
+      contentType: response.contentType || 'application/octet-stream',
+      dataBase64: response.dataBase64,
+    };
+  }
+
+  function decodeBase64ToBlob(base64Text, contentType) {
+    const binary = atob(base64Text);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: contentType || 'application/octet-stream' });
+  }
+
+  async function ensureDubbedMediaUrl(remoteUrl) {
+    if (!remoteUrl) {
+      throw new Error('缺少可播放的远端音频地址。');
+    }
+
+    const cached = state.dubbedMediaCache.get(remoteUrl);
+    if (cached?.objectUrl) {
+      cached.lastAccessAt = Date.now();
+      return cached.objectUrl;
+    }
+
+    const payload = await requestBinaryMediaViaExtension(remoteUrl, {
+      headers: buildProviderHeaders(state.settings.provider),
+    });
+    const objectUrl = URL.createObjectURL(decodeBase64ToBlob(payload.dataBase64, payload.contentType));
+    state.dubbedMediaCache.set(remoteUrl, {
+      remoteUrl,
+      objectUrl,
+      contentType: payload.contentType,
+      lastAccessAt: Date.now(),
+    });
+    return objectUrl;
+  }
+
+  function revokeDubbedMediaUrl(remoteUrl) {
+    const cached = state.dubbedMediaCache.get(remoteUrl);
+    if (!cached?.objectUrl) {
+      return;
+    }
+    if (state.dubbedAudio?.dataset.remoteUrl === remoteUrl) {
+      state.dubbedAudio.removeAttribute('src');
+      delete state.dubbedAudio.dataset.remoteUrl;
+    }
+    if (state.dubbedPreloadAudio?.dataset.remoteUrl === remoteUrl) {
+      state.dubbedPreloadAudio.removeAttribute('src');
+      delete state.dubbedPreloadAudio.dataset.remoteUrl;
+    }
+    URL.revokeObjectURL(cached.objectUrl);
+    state.dubbedMediaCache.delete(remoteUrl);
+  }
+
+  async function syncDubbedMediaWindow(remoteUrls) {
+    const nextWindow = new Set(remoteUrls.filter(Boolean));
+    for (const remoteUrl of nextWindow) {
+      await ensureDubbedMediaUrl(remoteUrl);
+    }
+    for (const remoteUrl of Array.from(state.dubbedMediaWindow)) {
+      if (!nextWindow.has(remoteUrl)) {
+        revokeDubbedMediaUrl(remoteUrl);
+      }
+    }
+    state.dubbedMediaWindow = nextWindow;
+  }
+
+  function clearDubbedMediaWindow() {
+    for (const remoteUrl of Array.from(state.dubbedMediaWindow)) {
+      revokeDubbedMediaUrl(remoteUrl);
+    }
+    state.dubbedMediaWindow = new Set();
+    if (state.dubbedAudio) {
+      state.dubbedAudio.removeAttribute('src');
+      delete state.dubbedAudio.dataset.remoteUrl;
+    }
+    if (state.dubbedPreloadAudio) {
+      state.dubbedPreloadAudio.removeAttribute('src');
+      delete state.dubbedPreloadAudio.dataset.remoteUrl;
+    }
+  }
+
   function extractResponseError(response) {
     if (!response) {
       return '请求失败。';
@@ -943,6 +1045,7 @@
     if (state.providerBaseUrlInput.value.trim() !== state.settings.provider.baseUrl) {
       state.providerBaseUrlInput.value = state.settings.provider.baseUrl;
     }
+    clearDubbedMediaWindow();
     saveSettings();
     if (event?.target === state.providerBaseUrlInput || event?.target === state.providerApiKeyInput) {
       void refreshProviderCapabilities(false);
@@ -985,6 +1088,7 @@
     state.settings.dubbing.result = null;
     state.dubbedSubtitleTrack = null;
     pauseDubbedAudio();
+    clearDubbedMediaWindow();
     restoreOriginalVideoAudio();
 
     try {
@@ -1559,6 +1663,7 @@
 
     if (!enabled || !hasPlayableDubResult(result)) {
       pauseDubbedAudio();
+      clearDubbedMediaWindow();
       restoreOriginalVideoAudio();
       return;
     }
@@ -1572,7 +1677,8 @@
   }
 
   async function syncFullDubbedPlayback(result, forceSeekSync) {
-    const audio = ensureDubbedAudio(result.audioUrl);
+    await syncDubbedMediaWindow([result.audioUrl]);
+    const audio = ensureDubbedAudio(result.audioUrl, await ensureDubbedMediaUrl(result.audioUrl));
     audio.playbackRate = state.video.playbackRate || 1;
 
     if (state.video.paused || state.video.ended) {
@@ -1601,14 +1707,21 @@
 
     if (!activeSegment) {
       pauseDubbedAudio();
+      clearDubbedMediaWindow();
       restoreOriginalVideoAudio();
       setDubbingStatus('running', getPartialDubbingDetail(result));
       return;
     }
 
-    const audio = ensureDubbedAudio(activeSegment.audioUrl);
+    const nextSegment = getReadyDubSegments(result).find((segment) => segment.index > activeSegment.index);
+    const requiredRemoteUrls = [activeSegment.audioUrl];
+    if (nextSegment?.audioUrl) {
+      requiredRemoteUrls.push(nextSegment.audioUrl);
+    }
+    await syncDubbedMediaWindow(requiredRemoteUrls);
+    const audio = ensureDubbedAudio(activeSegment.audioUrl, await ensureDubbedMediaUrl(activeSegment.audioUrl));
     audio.playbackRate = state.video.playbackRate || 1;
-    preloadNextDubSegment(result, activeSegment.index);
+    void preloadNextDubSegment(nextSegment);
 
     if (state.video.paused || state.video.ended) {
       audio.pause();
@@ -1660,24 +1773,26 @@
     return state.dubbedPreloadAudio;
   }
 
-  function preloadNextDubSegment(result, currentIndex) {
-    const nextSegment = getReadyDubSegments(result).find((segment) => segment.index > currentIndex);
+  async function preloadNextDubSegment(nextSegment) {
     if (!nextSegment?.audioUrl) {
       return;
     }
     const preloadAudio = ensureDubbedPreloadAudio();
-    if (preloadAudio.src !== nextSegment.audioUrl) {
-      preloadAudio.src = nextSegment.audioUrl;
+    const objectUrl = await ensureDubbedMediaUrl(nextSegment.audioUrl);
+    if (preloadAudio.dataset.remoteUrl !== nextSegment.audioUrl) {
+      preloadAudio.src = objectUrl;
+      preloadAudio.dataset.remoteUrl = nextSegment.audioUrl;
     }
   }
 
-  function ensureDubbedAudio(audioUrl) {
+  function ensureDubbedAudio(audioUrl, playbackUrl = audioUrl) {
     if (!state.dubbedAudio) {
       state.dubbedAudio = new Audio();
       state.dubbedAudio.preload = 'auto';
     }
-    if (state.dubbedAudio.src !== audioUrl) {
-      state.dubbedAudio.src = audioUrl;
+    if (state.dubbedAudio.dataset.remoteUrl !== audioUrl) {
+      state.dubbedAudio.src = playbackUrl;
+      state.dubbedAudio.dataset.remoteUrl = audioUrl;
       state.dubbedAudio.currentTime = 0;
     }
     return state.dubbedAudio;
@@ -1701,10 +1816,11 @@
       const activeSegment = findReadyDubSegmentForTime(state.settings.dubbing.result, getTargetDubTime());
       if (!activeSegment) {
         pauseDubbedAudio();
+        clearDubbedMediaWindow();
         restoreOriginalVideoAudio();
         return;
       }
-      if (state.dubbedAudio.src !== activeSegment.audioUrl) {
+      if (state.dubbedAudio.dataset.remoteUrl !== activeSegment.audioUrl) {
         void syncDubbingPlayback(true);
         return;
       }

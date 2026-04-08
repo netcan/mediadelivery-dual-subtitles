@@ -13,6 +13,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'fetchBinaryMedia' && typeof message.url === 'string') {
+    void handleFetchBinaryMedia(message, sendResponse);
+    return true;
+  }
+
   return false;
 });
 
@@ -68,6 +73,47 @@ async function handleHttpRequest(message, sendResponse) {
       headers: Object.fromEntries(response.headers.entries()),
       text,
       json,
+    });
+  } catch (error) {
+    sendResponse({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function handleFetchBinaryMedia(message, sendResponse) {
+  try {
+    const headers = new Headers(message.headers || {});
+    const response = await fetch(message.url, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      sendResponse({
+        ok: false,
+        status: response.status,
+        statusText: response.statusText,
+        error: `HTTP ${response.status}`,
+      });
+      return;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+
+    sendResponse({
+      ok: true,
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      dataBase64: btoa(binary),
     });
   } catch (error) {
     sendResponse({
