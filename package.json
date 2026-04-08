@@ -1,0 +1,10 @@
+{
+  "name": "mediadelivery-dual-subtitles",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "provider:start": "node local-provider/server.mjs",
+    "provider:mock-cosyvoice": "node local-provider/scripts/mock-cosyvoice-server.mjs",
+    "provider:smoke": "node local-provider/scripts/smoke-test.mjs"
+  }
+}
