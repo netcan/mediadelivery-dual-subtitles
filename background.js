@@ -38,12 +38,13 @@ async function handleFetchText(url, sendResponse) {
 async function handleHttpRequest(message, sendResponse) {
   try {
     const headers = new Headers(message.headers || {});
+    const method = typeof message.method === 'string' ? message.method.toUpperCase() : 'GET';
     const fetchOptions = {
-      method: typeof message.method === 'string' ? message.method : 'GET',
+      method,
       headers,
     };
 
-    if (typeof message.body === 'string') {
+    if (typeof message.body === 'string' && method !== 'GET' && method !== 'HEAD') {
       fetchOptions.body = message.body;
     }
 

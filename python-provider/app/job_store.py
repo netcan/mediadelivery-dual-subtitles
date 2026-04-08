@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
@@ -70,7 +71,7 @@ class JobStore:
             "updatedAt": job.updated_at,
         }
         if job.result is not None:
-            payload["result"] = job.result
+            payload["result"] = deepcopy(job.result)
         if job.error is not None:
-            payload["error"] = job.error
+            payload["error"] = deepcopy(job.error)
         return payload

@@ -132,13 +132,24 @@ def run_smoke(startup_mode: str, port: str):
         if final_payload.get("status") != "done" or not final_payload.get("result", {}).get("audioUrl"):
             raise RuntimeError("job did not finish successfully")
 
-        range_request = Request(final_payload["result"]["audioUrl"], method="GET")
+        result = final_payload["result"]
+        if not isinstance(result.get("segments"), list) or not result["segments"]:
+            raise RuntimeError("segment output missing")
+        first_segment = result["segments"][0]
+        if not first_segment.get("audioUrl"):
+            raise RuntimeError("segment audio url missing")
+
+        range_request = Request(result["audioUrl"], method="GET")
         range_request.add_header("Range", "bytes=0-31")
         with urlopen(range_request) as response:
             if response.status != 206:
                 raise RuntimeError(f"range request failed: {response.status}")
 
-        subtitle_status, subtitle_text = request_text(final_payload["result"]["subtitleUrl"])
+        segment_status, _ = request_text(first_segment["audioUrl"])
+        if segment_status != 200:
+            raise RuntimeError("segment audio output missing")
+
+        subtitle_status, subtitle_text = request_text(result["subtitleUrl"])
         if subtitle_status != 200 or "WEBVTT" not in subtitle_text:
             raise RuntimeError("subtitle output missing")
 
@@ -148,7 +159,8 @@ def run_smoke(startup_mode: str, port: str):
                     "ok": True,
                     "startupMode": startup_mode,
                     "jobId": final_payload.get("jobId"),
-                    "audioUrl": final_payload["result"]["audioUrl"],
+                    "audioUrl": result["audioUrl"],
+                    "segmentAudioUrl": first_segment["audioUrl"],
                 },
                 ensure_ascii=False,
                 indent=2,

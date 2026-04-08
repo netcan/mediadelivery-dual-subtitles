@@ -94,7 +94,7 @@ Provider 能力接口至少建议返回：
 
 - 扩展仍然调用 `POST /jobs`、`GET /jobs/:id`
 - Provider 新增 `GET /capabilities`，用于给前端返回可选音色
-- Python Provider 负责接收中文字幕时间轴、预处理文案、调用 VoxCPM、拼接成单条外挂中文音轨
+- Python Provider 负责接收中文字幕时间轴、预处理文案、调用 VoxCPM，并按分段逐步输出外挂中文音频
 - 默认走异步任务模式；如需同步返回，可设置 `PYTHON_PROVIDER_RESPONSE_MODE=sync` 或启动时传 `--response-mode sync`
 - 输出文件默认写到 `python-provider/output/`
 - 模型、模型路径和推理参数由 Provider 内部管理
@@ -150,7 +150,7 @@ npm run provider:start -- --host 127.0.0.1 --port 8000 --model-id openbmb/VoxCPM
 - `--inference-timesteps`：默认 `inference_timesteps`
 - `--output-dir`：输出目录
 - `--load-denoiser` / `--no-load-denoiser`
-- `--preload-model` / `--no-preload-model`
+- `--preload-model` / `--no-preload-model`：默认会预加载，如需关闭可显式传 `--no-preload-model`
 - `--enable-mock` / `--no-enable-mock`
 
 说明：
@@ -179,7 +179,7 @@ npm run provider:start
 - `VOXCPM_INFERENCE_TIMESTEPS`：默认 `inference_timesteps`
 - `VOXCPM_DEFAULT_VOICE`：默认音色 ID
 - `VOXCPM_VOICE_PRESETS_JSON`：可选音色配置 JSON
-- `VOXCPM_PRELOAD_MODEL`：是否在启动时预热模型
+- `VOXCPM_PRELOAD_MODEL`：是否在启动时预热模型，默认开启
 
 示例音色配置：
 
@@ -199,9 +199,11 @@ export VOXCPM_VOICE_PRESETS_JSON='{"default":{"label":"默认音色"},"warm":{"l
 
 - 当前首期链路使用 **现有中文字幕** 直接驱动配音
 - 服务会在 TTS 前做基础清洗与轻量口语化预处理，并把相邻短字幕合并，减少“逐字念字幕”的机械感
+- Provider 运行中会逐步返回已完成分段与可播放进度；任务完成后仍会返回最终整段 `audioUrl`
 - 输出结果会返回 `audioUrl`、`subtitleUrl`、`segments` 和 `audioOffsetSec`
 - 未选择音色时，Provider 会回退到默认音色
 - 插件仍允许你填自定义 IP / 端口 / Base URL，以便连接本机或局域网中的 Provider
+- 当前插件会在前几段中文配音已就绪后允许提前启用播放；若跳转到尚未生成的位置，会暂时回退到原声或等待后续分段完成
 
 ### 开发联调
 
@@ -223,7 +225,7 @@ npm run provider:smoke
 - 请求 `GET /capabilities`
 - 发送与扩展一致的 `POST /jobs` 请求
 - 轮询 `GET /jobs/:id`
-- 校验 `audioUrl`、`subtitleUrl` 和音频 `Range` 访问
+- 校验最终 `audioUrl`、分段 `audioUrl`、`subtitleUrl` 和音频 `Range` 访问
 
 如果你只想单独验证一种方式，也可以这样运行：
 
@@ -240,9 +242,11 @@ python3 python-provider/scripts/smoke_test.py --startup-mode env
 - 在扩展中填写自定义 Provider 地址
 - 点击 `读取音色`，确认能拿到 `GET /capabilities` 返回的音色列表
 - 点击 `生成中文配音`，确认面板能显示排队、处理中、成功或失败状态
-- 确认 `python-provider/output/` 中生成了 `.wav` 与 `.vtt`
-- 任务完成后启用 `中文配音`，确认视频原声被静音且中文配音与播放进度同步
+- 确认 `python-provider/output/` 中生成了分段 `.wav`、最终 `.wav` 与 `.vtt`
+- 当前几段中文配音就绪后尝试启用 `中文配音`，确认无需等待整条视频全部生成完成
+- 任务完成后继续播放 `中文配音`，确认视频原声被静音且中文配音与播放进度同步
 - 手动执行暂停、继续、跳转、倍速切换，确认外挂中文音频能够跟随同步
+- 手动跳转到一个尚未生成完成的位置，确认会回退到原声或等待，而不是一直卡在静音状态
 - 若 Provider 返回 `subtitleUrl`，确认仍至少存在一条可用中文字幕路径
 - 故意让 VoxCPM 环境不可用后再次创建任务，确认能看到“模型加载失败 / 初始化失败”类错误
 - 关闭 `中文配音`，确认可以恢复原视频默认音频行为

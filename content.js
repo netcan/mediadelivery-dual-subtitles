@@ -63,6 +63,7 @@
     pollTimer: null,
     dubSyncTimer: null,
     dubbedAudio: null,
+    dubbedPreloadAudio: null,
     savedVideoAudioState: null,
   };
 
@@ -732,13 +733,16 @@
   }
 
   async function requestJsonViaExtension(url, options = {}) {
-    const response = await chrome.runtime.sendMessage({
+    const message = {
       type: 'httpRequest',
       url,
       method: options.method || 'GET',
       headers: options.headers || {},
-      body: options.body || '',
-    });
+    };
+    if (typeof options.body === 'string') {
+      message.body = options.body;
+    }
+    const response = await chrome.runtime.sendMessage(message);
 
     if (!response) {
       throw new Error('未收到扩展后台响应。');
@@ -980,6 +984,8 @@
     stopDubbingPolling();
     state.settings.dubbing.result = null;
     state.dubbedSubtitleTrack = null;
+    pauseDubbedAudio();
+    restoreOriginalVideoAudio();
 
     try {
       const response = await requestJsonViaExtension(joinUrl(state.settings.provider.baseUrl, '/jobs'), {
@@ -990,7 +996,7 @@
 
       const normalized = normalizeJobEnvelope(response, state.settings.provider.baseUrl);
       if (normalized.result) {
-        await applyDubbingResult(normalized.result);
+        await applyDubbingResult(normalized.result, normalized.status);
         return;
       }
 
@@ -1035,7 +1041,7 @@
       const normalized = normalizeJobEnvelope(response, state.settings.provider.baseUrl);
 
       if (normalized.result) {
-        await applyDubbingResult(normalized.result);
+        await applyDubbingResult(normalized.result, normalized.status);
         return;
       }
 
@@ -1070,15 +1076,14 @@
     }
   }
 
-  async function applyDubbingResult(result) {
+  async function applyDubbingResult(result, nextStatus = 'done') {
     state.settings.dubbing.result = result;
-    state.settings.dubbing.status = 'done';
+    state.settings.dubbing.status = normalizeJobStatus(nextStatus) || (result.audioUrl ? 'done' : 'running');
     state.settings.dubbing.lastError = '';
     if (result.jobId) {
       state.settings.dubbing.jobId = result.jobId;
     }
     saveSettings();
-    stopDubbingPolling();
 
     if (result.subtitleUrl) {
       await loadDubbedSubtitleTrack(result.subtitleUrl);
@@ -1087,7 +1092,13 @@
       await refreshTracks(false);
     }
 
-    setDubbingStatus('done', '中文配音结果已就绪，可启用播放。');
+    if (state.settings.dubbing.status === 'done' && result.audioUrl) {
+      stopDubbingPolling();
+      setDubbingStatus('done', '中文配音结果已就绪，可启用播放。');
+    } else {
+      setDubbingStatus('running', getPartialDubbingDetail(result));
+      scheduleDubbingPolling();
+    }
     refreshDubbingControls();
     await syncDubbingPlayback(true);
   }
@@ -1104,6 +1115,7 @@
         label: 'Dubbed Result Subtitle',
         kind: 'imported',
         lang: 'zh',
+        sourceUrl: subtitleUrl,
         cues,
       };
       await refreshTracks(false);
@@ -1312,7 +1324,7 @@
     const error = normalizeErrorMessage(source.error || source.message || '');
 
     return {
-      status: result ? 'done' : status,
+      status: result?.audioUrl ? 'done' : status,
       jobId,
       pollUrl,
       result,
@@ -1336,26 +1348,68 @@
       ),
       baseUrl
     );
+    const segments = normalizeDubSegments(
+      Array.isArray(source.segments) ? source.segments : Array.isArray(source.result?.segments) ? source.result.segments : [],
+      baseUrl
+    );
+    const playback = source.playback && typeof source.playback === 'object' ? source.playback : {};
+    const readyThroughSec = toFiniteNumber(source.readyThroughSec ?? playback.readyThroughSec) || 0;
+    const readySegmentCount =
+      toFiniteNumber(source.readySegmentCount ?? playback.readySegmentCount) || segments.filter((segment) => segment.audioUrl).length;
+    const playable = Boolean(source.playable ?? playback.playable ?? audioUrl);
+    const totalSegments = toFiniteNumber(source.totalSegments ?? playback.totalSegments) || segments.length;
+    const subtitleUrl = resolveMaybeUrl(
+      firstString(
+        source.subtitleUrl,
+        source.subtitle_url,
+        source.vttUrl,
+        source.result?.subtitleUrl,
+        source.subtitles?.zh
+      ),
+      baseUrl
+    );
 
-    if (!audioUrl) {
+    if (!audioUrl && !subtitleUrl && !segments.length && !playable) {
       return null;
     }
 
     return {
       jobId: firstString(source.jobId, source.id, source.taskId),
       audioUrl,
-      subtitleUrl: resolveMaybeUrl(
-        firstString(
-          source.subtitleUrl,
-          source.subtitle_url,
-          source.vttUrl,
-          source.result?.subtitleUrl,
-          source.subtitles?.zh
-        ),
-        baseUrl
-      ),
-      segments: Array.isArray(source.segments) ? source.segments : [],
+      subtitleUrl,
+      segments,
       audioOffsetSec: toFiniteNumber(source.audioOffsetSec) || 0,
+      playable,
+      readyThroughSec,
+      readySegmentCount,
+      totalSegments,
+      partial: !audioUrl,
+    };
+  }
+
+  function normalizeDubSegments(segments, baseUrl = '') {
+    if (!Array.isArray(segments)) {
+      return [];
+    }
+    return segments
+      .map((segment, index) => normalizeDubSegment(segment, baseUrl, index))
+      .filter(Boolean);
+  }
+
+  function normalizeDubSegment(segment, baseUrl = '', fallbackIndex = 0) {
+    if (!segment || typeof segment !== 'object') {
+      return null;
+    }
+    return {
+      index: Number.isFinite(Number(segment.index)) ? Number(segment.index) : fallbackIndex,
+      start: toFiniteNumber(segment.start) || 0,
+      end: toFiniteNumber(segment.end) || 0,
+      text: typeof segment.text === 'string' ? segment.text : '',
+      cueCount: toFiniteNumber(segment.cueCount) || 0,
+      status: normalizeJobStatus(segment.status || segment.state || ''),
+      audioUrl: resolveMaybeUrl(firstString(segment.audioUrl, segment.audio_url, segment.url), baseUrl),
+      audioDurationSec: toFiniteNumber(segment.audioDurationSec ?? segment.audio_duration_sec) || 0,
+      voicePreset: firstString(segment.voicePreset, segment.voice_preset),
     };
   }
 
@@ -1453,9 +1507,38 @@
     }[status] || status || '未知状态';
   }
 
+  function hasPlayableDubResult(result) {
+    if (!result || typeof result !== 'object') {
+      return false;
+    }
+    if (result.audioUrl) {
+      return true;
+    }
+    if (result.playable) {
+      return true;
+    }
+    return getReadyDubSegments(result).length > 0;
+  }
+
+  function getReadyDubSegments(result) {
+    return Array.isArray(result?.segments) ? result.segments.filter((segment) => segment?.audioUrl) : [];
+  }
+
+  function getPartialDubbingDetail(result) {
+    if (!result || typeof result !== 'object') {
+      return '';
+    }
+    const readyThroughSec = Number(result.readyThroughSec || 0);
+    const readySegmentCount = Number(result.readySegmentCount || 0);
+    if (readySegmentCount > 0) {
+      return `中文配音前 ${readyThroughSec.toFixed(1)} 秒已可播放，后台继续生成中。`;
+    }
+    return '中文配音任务进行中。';
+  }
+
   function refreshDubbingControls() {
     const hasChineseTrack = Boolean(getPreferredChineseTrackForDubbing());
-    const hasResult = Boolean(state.settings.dubbing.result?.audioUrl);
+    const hasResult = hasPlayableDubResult(state.settings.dubbing.result);
     state.dubbingGenerateButton.disabled = !hasChineseTrack;
     state.dubbingRefreshButton.disabled = !state.settings.dubbing.jobId && !state.settings.dubbing.pollUrl && !hasResult;
     state.dubbingEnabledCheckbox.disabled = !hasResult;
@@ -1474,12 +1557,21 @@
     const result = state.settings.dubbing.result;
     const enabled = state.settings.dubbing.enabled === true;
 
-    if (!enabled || !result?.audioUrl) {
+    if (!enabled || !hasPlayableDubResult(result)) {
       pauseDubbedAudio();
       restoreOriginalVideoAudio();
       return;
     }
 
+    if (!result.partial && result.audioUrl) {
+      await syncFullDubbedPlayback(result, forceSeekSync);
+      return;
+    }
+
+    await syncSegmentedDubbedPlayback(result, forceSeekSync);
+  }
+
+  async function syncFullDubbedPlayback(result, forceSeekSync) {
     const audio = ensureDubbedAudio(result.audioUrl);
     audio.playbackRate = state.video.playbackRate || 1;
 
@@ -1503,6 +1595,82 @@
     }
   }
 
+  async function syncSegmentedDubbedPlayback(result, forceSeekSync) {
+    const targetTime = getTargetDubTime();
+    const activeSegment = findReadyDubSegmentForTime(result, targetTime);
+
+    if (!activeSegment) {
+      pauseDubbedAudio();
+      restoreOriginalVideoAudio();
+      setDubbingStatus('running', getPartialDubbingDetail(result));
+      return;
+    }
+
+    const audio = ensureDubbedAudio(activeSegment.audioUrl);
+    audio.playbackRate = state.video.playbackRate || 1;
+    preloadNextDubSegment(result, activeSegment.index);
+
+    if (state.video.paused || state.video.ended) {
+      audio.pause();
+      return;
+    }
+
+    saveOriginalVideoAudioState();
+    state.video.muted = true;
+
+    const segmentTargetTime = Math.max(0, targetTime - activeSegment.start);
+    if (forceSeekSync || Math.abs(audio.currentTime - segmentTargetTime) > DUB_SYNC_THRESHOLD_SEC) {
+      setAudioTimeSafe(audio, segmentTargetTime);
+    }
+
+    try {
+      await audio.play();
+      setDubbingStatus('running', `中文配音分段播放中，已生成 ${activeSegment.index + 1}/${result.totalSegments || result.segments.length || '?' } 段。`);
+    } catch (error) {
+      setDubbingStatus('error', `中文配音分段已就绪，但浏览器阻止自动播放：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function getSegmentPlayableEnd(segment) {
+    const durationSec = Math.max(segment.audioDurationSec || 0, (segment.end || 0) - (segment.start || 0));
+    return (segment.start || 0) + durationSec;
+  }
+
+  function findReadyDubSegmentForTime(result, targetTime) {
+    const segments = getReadyDubSegments(result);
+    let candidate = null;
+    for (const segment of segments) {
+      if (targetTime < segment.start) {
+        continue;
+      }
+      if (targetTime < getSegmentPlayableEnd(segment)) {
+        if (!candidate || segment.start >= candidate.start) {
+          candidate = segment;
+        }
+      }
+    }
+    return candidate;
+  }
+
+  function ensureDubbedPreloadAudio() {
+    if (!state.dubbedPreloadAudio) {
+      state.dubbedPreloadAudio = new Audio();
+      state.dubbedPreloadAudio.preload = 'auto';
+    }
+    return state.dubbedPreloadAudio;
+  }
+
+  function preloadNextDubSegment(result, currentIndex) {
+    const nextSegment = getReadyDubSegments(result).find((segment) => segment.index > currentIndex);
+    if (!nextSegment?.audioUrl) {
+      return;
+    }
+    const preloadAudio = ensureDubbedPreloadAudio();
+    if (preloadAudio.src !== nextSegment.audioUrl) {
+      preloadAudio.src = nextSegment.audioUrl;
+    }
+  }
+
   function ensureDubbedAudio(audioUrl) {
     if (!state.dubbedAudio) {
       state.dubbedAudio = new Audio();
@@ -1519,10 +1687,31 @@
     if (state.dubbedAudio) {
       state.dubbedAudio.pause();
     }
+    if (state.dubbedPreloadAudio) {
+      state.dubbedPreloadAudio.pause();
+    }
   }
 
   function syncDubbedAudioDrift() {
     if (!state.settings.dubbing.enabled || !state.dubbedAudio || state.video.paused) {
+      return;
+    }
+
+    if (state.settings.dubbing.result?.partial) {
+      const activeSegment = findReadyDubSegmentForTime(state.settings.dubbing.result, getTargetDubTime());
+      if (!activeSegment) {
+        pauseDubbedAudio();
+        restoreOriginalVideoAudio();
+        return;
+      }
+      if (state.dubbedAudio.src !== activeSegment.audioUrl) {
+        void syncDubbingPlayback(true);
+        return;
+      }
+      const target = Math.max(0, getTargetDubTime() - activeSegment.start);
+      if (Math.abs(state.dubbedAudio.currentTime - target) > DUB_SYNC_THRESHOLD_SEC) {
+        setAudioTimeSafe(state.dubbedAudio, target);
+      }
       return;
     }
 
@@ -1603,6 +1792,24 @@
     };
   }
 
+  function compactDubResultForStorage(result) {
+    if (!result || typeof result !== 'object') {
+      return null;
+    }
+    return {
+      jobId: result.jobId || '',
+      audioUrl: result.audioUrl || '',
+      subtitleUrl: result.subtitleUrl || '',
+      audioOffsetSec: result.audioOffsetSec || 0,
+      playable: result.playable === true,
+      readyThroughSec: result.readyThroughSec || 0,
+      readySegmentCount: result.readySegmentCount || 0,
+      totalSegments: result.totalSegments || 0,
+      partial: result.partial === true,
+      segments: [],
+    };
+  }
+
   function loadSettings() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -1612,7 +1819,11 @@
   }
 
   function saveSettings() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeSettings(state.settings)));
+    const normalized = normalizeSettings(state.settings);
+    if (normalized.dubbing?.result) {
+      normalized.dubbing.result = compactDubResultForStorage(normalized.dubbing.result);
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   }
 
   function safeParseJson(text) {
