@@ -1697,6 +1697,8 @@
       await audio.play();
       setDubbingStatus('done', '中文配音播放中。可关闭开关切回原声。');
     } catch (error) {
+      pauseDubbedAudio();
+      restoreOriginalVideoAudio();
       setDubbingStatus('error', `中文配音已就绪，但浏览器阻止自动播放：${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -1740,6 +1742,8 @@
       await audio.play();
       setDubbingStatus('running', `中文配音分段播放中，已生成 ${activeSegment.index + 1}/${result.totalSegments || result.segments.length || '?' } 段。`);
     } catch (error) {
+      pauseDubbedAudio();
+      restoreOriginalVideoAudio();
       setDubbingStatus('error', `中文配音分段已就绪，但浏览器阻止自动播放：${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -1853,19 +1857,55 @@
     if (!state.video || state.savedVideoAudioState) {
       return;
     }
-    state.savedVideoAudioState = {
+    const persisted = readPersistedOriginalVideoAudioState();
+    state.savedVideoAudioState = persisted || {
       muted: state.video.muted,
       volume: state.video.volume,
     };
+    persistOriginalVideoAudioState(state.savedVideoAudioState);
   }
 
   function restoreOriginalVideoAudio() {
-    if (!state.video || !state.savedVideoAudioState) {
+    if (!state.video) {
       return;
     }
-    state.video.muted = state.savedVideoAudioState.muted;
-    state.video.volume = state.savedVideoAudioState.volume;
+    const saved = state.savedVideoAudioState || readPersistedOriginalVideoAudioState();
+    if (!saved) {
+      return;
+    }
+    state.video.muted = saved.muted;
+    state.video.volume = saved.volume;
     state.savedVideoAudioState = null;
+    clearPersistedOriginalVideoAudioState();
+  }
+
+  function persistOriginalVideoAudioState(audioState) {
+    if (!state.video || !audioState) {
+      return;
+    }
+    state.video.dataset.btcOriginalMuted = audioState.muted ? 'true' : 'false';
+    state.video.dataset.btcOriginalVolume = String(audioState.volume);
+    state.video.dataset.btcDubbingManaged = 'true';
+  }
+
+  function readPersistedOriginalVideoAudioState() {
+    if (!state.video || state.video.dataset.btcDubbingManaged !== 'true') {
+      return null;
+    }
+    const parsedVolume = Number.parseFloat(state.video.dataset.btcOriginalVolume || '1');
+    return {
+      muted: state.video.dataset.btcOriginalMuted === 'true',
+      volume: Number.isFinite(parsedVolume) ? parsedVolume : 1,
+    };
+  }
+
+  function clearPersistedOriginalVideoAudioState() {
+    if (!state.video) {
+      return;
+    }
+    delete state.video.dataset.btcOriginalMuted;
+    delete state.video.dataset.btcOriginalVolume;
+    delete state.video.dataset.btcDubbingManaged;
   }
 
   function normalizeSettings(raw) {
