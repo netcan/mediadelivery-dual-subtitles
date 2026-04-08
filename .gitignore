@@ -1,3 +1,5 @@
 .DS_Store
-local-provider/output/*
-!local-provider/output/.gitkeep
+python-provider/output/*
+!python-provider/output/.gitkeep
+__pycache__/
+*.pyc

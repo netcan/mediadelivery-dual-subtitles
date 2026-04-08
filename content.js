@@ -18,8 +18,6 @@
     type: 'custom',
     baseUrl: '',
     apiKey: '',
-    translationModel: '',
-    ttsModel: '',
     voicePreset: '',
   };
 
@@ -45,12 +43,12 @@
     secondarySelect: null,
     enabledCheckbox: null,
     importInput: null,
-    providerTypeSelect: null,
     providerBaseUrlInput: null,
     providerApiKeyInput: null,
-    providerTranslationModelInput: null,
-    providerTtsModelInput: null,
-    providerVoicePresetInput: null,
+    providerVoicePresetSelect: null,
+    providerVoiceRefreshButton: null,
+    providerCapabilitiesNote: null,
+    providerCapabilities: null,
     dubbingEnabledCheckbox: null,
     dubbingSubtitleModeSelect: null,
     dubbingGenerateButton: null,
@@ -346,24 +344,19 @@
         <div class="btc-note">默认优先选择 English + Chinese。若站点没给中文轨，可导入你自己的中文字幕文件。</div>
 
         <div class="btc-section">
-          <div class="btc-section-title">模型 Provider</div>
-          <label for="btc-provider-type">Provider 类型</label>
-          <select id="btc-provider-type">
-            <option value="custom">自定义 HTTP API</option>
-            <option value="openai-compatible">OpenAI-compatible</option>
-            <option value="localhost">本地 localhost 服务</option>
-            <option value="cloud">云端托管 API</option>
-          </select>
-          <label for="btc-provider-base-url">Base URL</label>
+          <div class="btc-section-title">Python Provider</div>
+          <label for="btc-provider-base-url">Provider 地址</label>
           <input id="btc-provider-base-url" type="text" placeholder="例如 http://127.0.0.1:8000">
-          <label for="btc-provider-api-key">API Key / Token</label>
-          <input id="btc-provider-api-key" type="password" placeholder="按 Provider 需要填写">
-          <label for="btc-provider-translation-model">翻译模型</label>
-          <input id="btc-provider-translation-model" type="text" placeholder="例如 qwen-plus">
-          <label for="btc-provider-tts-model">TTS / 配音模型</label>
-          <input id="btc-provider-tts-model" type="text" placeholder="例如 cosyvoice-v2">
-          <label for="btc-provider-voice-preset">音色 / Voice Preset（可选）</label>
-          <input id="btc-provider-voice-preset" type="text" placeholder="例如 female-natural-1">
+          <label for="btc-provider-api-key">API Key / Token（可选）</label>
+          <input id="btc-provider-api-key" type="password" placeholder="远端 Provider 需要时再填写">
+          <div class="btc-actions">
+            <button type="button" id="btc-provider-refresh-voices">读取音色</button>
+          </div>
+          <label for="btc-provider-voice-preset">音色</label>
+          <select id="btc-provider-voice-preset">
+            <option value="">跟随 Provider 默认音色</option>
+          </select>
+          <div id="btc-provider-capabilities-note" class="btc-note">模型和推理参数由 Provider 管理；前端只配置地址并选择音色。</div>
         </div>
 
         <div class="btc-section">
@@ -395,12 +388,11 @@
     state.secondarySelect = root.querySelector('#btc-secondary');
     state.enabledCheckbox = root.querySelector('#btc-enabled');
     state.importInput = root.querySelector('#btc-import');
-    state.providerTypeSelect = root.querySelector('#btc-provider-type');
     state.providerBaseUrlInput = root.querySelector('#btc-provider-base-url');
     state.providerApiKeyInput = root.querySelector('#btc-provider-api-key');
-    state.providerTranslationModelInput = root.querySelector('#btc-provider-translation-model');
-    state.providerTtsModelInput = root.querySelector('#btc-provider-tts-model');
-    state.providerVoicePresetInput = root.querySelector('#btc-provider-voice-preset');
+    state.providerVoicePresetSelect = root.querySelector('#btc-provider-voice-preset');
+    state.providerVoiceRefreshButton = root.querySelector('#btc-provider-refresh-voices');
+    state.providerCapabilitiesNote = root.querySelector('#btc-provider-capabilities-note');
     state.dubbingEnabledCheckbox = root.querySelector('#btc-dubbing-enabled');
     state.dubbingSubtitleModeSelect = root.querySelector('#btc-dubbing-subtitle-mode');
     state.dubbingGenerateButton = root.querySelector('#btc-dubbing-generate');
@@ -468,17 +460,12 @@
       renderSubtitles();
     });
 
-    for (const element of [
-      state.providerTypeSelect,
-      state.providerBaseUrlInput,
-      state.providerApiKeyInput,
-      state.providerTranslationModelInput,
-      state.providerTtsModelInput,
-      state.providerVoicePresetInput,
-    ]) {
-      element.addEventListener('change', handleProviderChange);
-      element.addEventListener('input', handleProviderChange);
-    }
+    state.providerBaseUrlInput.addEventListener('change', handleProviderChange);
+    state.providerApiKeyInput.addEventListener('change', handleProviderChange);
+    state.providerVoicePresetSelect.addEventListener('change', handleProviderChange);
+    state.providerVoiceRefreshButton.addEventListener('click', () => {
+      void refreshProviderCapabilities(true);
+    });
 
     state.dubbingEnabledCheckbox.addEventListener('change', () => {
       state.settings.dubbing.enabled = state.dubbingEnabledCheckbox.checked;
@@ -504,15 +491,16 @@
 
   function hydratePanel() {
     state.enabledCheckbox.checked = state.settings.enabled !== false;
-    state.providerTypeSelect.value = state.settings.provider.type;
     state.providerBaseUrlInput.value = state.settings.provider.baseUrl;
     state.providerApiKeyInput.value = state.settings.provider.apiKey;
-    state.providerTranslationModelInput.value = state.settings.provider.translationModel;
-    state.providerTtsModelInput.value = state.settings.provider.ttsModel;
-    state.providerVoicePresetInput.value = state.settings.provider.voicePreset;
+    renderProviderVoiceOptions();
     state.dubbingEnabledCheckbox.checked = state.settings.dubbing.enabled === true;
     state.dubbingSubtitleModeSelect.value = state.settings.dubbing.subtitleMode;
     setDubbingStatus(state.settings.dubbing.status, state.settings.dubbing.lastError || defaultStatusText(state.settings.dubbing.status));
+    setProviderCapabilitiesNote('模型和推理参数由 Provider 管理；前端只配置地址并选择音色。');
+    if (state.settings.provider.baseUrl) {
+      void refreshProviderCapabilities(false);
+    }
     refreshDubbingControls();
   }
 
@@ -935,23 +923,16 @@
     }[code] || '';
   }
 
-  function handleProviderChange() {
-    const nextType = state.providerTypeSelect.value;
+  function handleProviderChange(event) {
     const provider = {
-      type: nextType,
+      type: state.settings.provider.type || 'custom',
       baseUrl: state.providerBaseUrlInput.value.trim(),
       apiKey: state.providerApiKeyInput.value.trim(),
-      translationModel: state.providerTranslationModelInput.value.trim(),
-      ttsModel: state.providerTtsModelInput.value.trim(),
-      voicePreset: state.providerVoicePresetInput.value.trim(),
+      voicePreset: state.providerVoicePresetSelect.value.trim(),
     };
 
     if (!provider.baseUrl) {
-      if (nextType === 'localhost') {
-        provider.baseUrl = 'http://127.0.0.1:8000';
-      } else if (nextType === 'openai-compatible') {
-        provider.baseUrl = 'https://api.example.com/v1';
-      }
+      provider.baseUrl = 'http://127.0.0.1:8000';
     }
 
     state.settings.provider = normalizeProvider(provider);
@@ -959,6 +940,9 @@
       state.providerBaseUrlInput.value = state.settings.provider.baseUrl;
     }
     saveSettings();
+    if (event?.target === state.providerBaseUrlInput || event?.target === state.providerApiKeyInput) {
+      void refreshProviderCapabilities(false);
+    }
     refreshDubbingControls();
   }
 
@@ -987,8 +971,6 @@
       },
       provider: {
         type: state.settings.provider.type,
-        translationModel: state.settings.provider.translationModel,
-        ttsModel: state.settings.provider.ttsModel,
         voicePreset: state.settings.provider.voicePreset,
       },
       subtitles: subtitlePayload.payload,
@@ -1222,19 +1204,101 @@
       return { ok: false, message: 'Provider Base URL 格式无效。' };
     }
 
-    if (!provider.translationModel) {
-      return { ok: false, message: '请先填写翻译模型名称。' };
-    }
-
-    if (!provider.ttsModel) {
-      return { ok: false, message: '请先填写 TTS / 配音模型名称。' };
-    }
-
-    if ((provider.type === 'cloud' || provider.type === 'openai-compatible') && !provider.apiKey) {
-      return { ok: false, message: '当前 Provider 类型通常需要 API Key / Token。' };
-    }
-
     return { ok: true };
+  }
+
+  function normalizeProviderCapabilities(data) {
+    const source = data?.data && typeof data.data === 'object' ? data.data : data || {};
+    const voicesRaw = Array.isArray(source.voices) ? source.voices : Array.isArray(source.voicePresets) ? source.voicePresets : [];
+    const voices = voicesRaw
+      .map((voice) => {
+        if (typeof voice === 'string') {
+          return { id: voice, label: voice };
+        }
+        if (!voice || typeof voice !== 'object') {
+          return null;
+        }
+        const id = firstString(voice.id, voice.value, voice.name, voice.key);
+        if (!id) {
+          return null;
+        }
+        return {
+          id,
+          label: firstString(voice.label, voice.title, voice.name, id),
+        };
+      })
+      .filter(Boolean);
+    const defaultVoice = firstString(source.defaultVoice, source.default_voice, source.voice);
+    if (defaultVoice && !voices.some((voice) => voice.id === defaultVoice)) {
+      voices.unshift({ id: defaultVoice, label: defaultVoice });
+    }
+    return {
+      voices,
+      defaultVoice,
+      provider: firstString(source.provider, source.name) || 'provider',
+    };
+  }
+
+  function renderProviderVoiceOptions() {
+    if (!state.providerVoicePresetSelect) {
+      return;
+    }
+
+    const currentVoice = state.settings.provider.voicePreset || '';
+    const voices = Array.isArray(state.providerCapabilities?.voices) ? state.providerCapabilities.voices : [];
+    const options = [{ id: '', label: '跟随 Provider 默认音色' }, ...voices];
+
+    if (currentVoice && !options.some((voice) => voice.id === currentVoice)) {
+      options.push({ id: currentVoice, label: `${currentVoice}（当前配置）` });
+    }
+
+    state.providerVoicePresetSelect.innerHTML = options
+      .map((voice) => `<option value="${escapeHtml(voice.id)}">${escapeHtml(voice.label)}</option>`)
+      .join('');
+    state.providerVoicePresetSelect.value = options.some((voice) => voice.id === currentVoice) ? currentVoice : '';
+  }
+
+  function setProviderCapabilitiesNote(message) {
+    if (state.providerCapabilitiesNote) {
+      state.providerCapabilitiesNote.textContent = message;
+    }
+  }
+
+  async function refreshProviderCapabilities(showStatus) {
+    if (!state.settings.provider.baseUrl) {
+      state.providerCapabilities = null;
+      renderProviderVoiceOptions();
+      if (showStatus) {
+        setProviderCapabilitiesNote('请先填写 Provider 地址。');
+      }
+      return;
+    }
+
+    try {
+      const response = await requestJsonViaExtension(joinUrl(state.settings.provider.baseUrl, '/capabilities'), {
+        method: 'GET',
+        headers: buildProviderHeaders(state.settings.provider),
+      });
+      state.providerCapabilities = normalizeProviderCapabilities(response);
+      if (!state.settings.provider.voicePreset && state.providerCapabilities.defaultVoice) {
+        state.settings.provider.voicePreset = state.providerCapabilities.defaultVoice;
+      }
+      renderProviderVoiceOptions();
+      saveSettings();
+      if (showStatus || state.providerCapabilities.voices.length) {
+        setProviderCapabilitiesNote(
+          state.providerCapabilities.voices.length
+            ? `已读取 ${state.providerCapabilities.voices.length} 个音色；模型参数由 Provider 管理。`
+            : 'Provider 未返回可选音色，当前将使用默认音色。'
+        );
+      }
+    } catch (error) {
+      state.providerCapabilities = null;
+      renderProviderVoiceOptions();
+      if (showStatus) {
+        setProviderCapabilitiesNote(`读取音色失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   function normalizeJobEnvelope(data, baseUrl) {
@@ -1517,9 +1581,6 @@
       type: typeof next.type === 'string' && next.type ? next.type : DEFAULT_PROVIDER.type,
       baseUrl: typeof next.baseUrl === 'string' ? next.baseUrl : DEFAULT_PROVIDER.baseUrl,
       apiKey: typeof next.apiKey === 'string' ? next.apiKey : DEFAULT_PROVIDER.apiKey,
-      translationModel:
-        typeof next.translationModel === 'string' ? next.translationModel : DEFAULT_PROVIDER.translationModel,
-      ttsModel: typeof next.ttsModel === 'string' ? next.ttsModel : DEFAULT_PROVIDER.ttsModel,
       voicePreset: typeof next.voicePreset === 'string' ? next.voicePreset : DEFAULT_PROVIDER.voicePreset,
     };
   }
