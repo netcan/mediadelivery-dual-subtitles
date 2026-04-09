@@ -36,6 +36,7 @@
     video: null,
     container: null,
     overlay: null,
+    subtitleOverlay: null,
     primaryLine: null,
     secondaryLine: null,
     panel: null,
@@ -68,6 +69,8 @@
     dubbedMediaWindow: new Set(),
     savedVideoAudioState: null,
     keyboardHandler: null,
+    subtitleOverlayPosition: null,
+    subtitleDrag: null,
   };
 
   const style = document.createElement('style');
@@ -94,6 +97,14 @@
       flex-direction: column;
       align-items: center;
       text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
+      pointer-events: auto;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+
+    #btc-bilingual-overlay.btc-dragging {
+      cursor: grabbing;
     }
 
     .btc-sub-line {
@@ -389,6 +400,7 @@
 
     getOverlayMountTarget().appendChild(root);
     state.overlay = root;
+    state.subtitleOverlay = root.querySelector('#btc-bilingual-overlay');
     state.primaryLine = root.querySelector('.btc-sub-line.primary');
     state.secondaryLine = root.querySelector('.btc-sub-line.secondary');
     state.panel = root.querySelector('#btc-bilingual-panel');
@@ -406,6 +418,10 @@
     state.dubbingGenerateButton = root.querySelector('#btc-dubbing-generate');
     state.dubbingRefreshButton = root.querySelector('#btc-dubbing-refresh');
     state.dubbingStatus = root.querySelector('#btc-dubbing-status');
+    state.subtitleOverlay.addEventListener('pointerdown', handleSubtitleOverlayPointerDown);
+    state.subtitleOverlay.addEventListener('pointermove', handleSubtitleOverlayPointerMove);
+    state.subtitleOverlay.addEventListener('pointerup', handleSubtitleOverlayPointerEnd);
+    state.subtitleOverlay.addEventListener('pointercancel', handleSubtitleOverlayPointerEnd);
 
     root.querySelector('button').addEventListener('click', () => {
       state.panel.hidden = !state.panel.hidden;
@@ -612,6 +628,115 @@
     if (state.overlay.parentElement !== target) {
       target.appendChild(state.overlay);
     }
+    syncSubtitleOverlayPosition();
+  }
+
+  function handleSubtitleOverlayPointerDown(event) {
+    if (
+      !state.subtitleOverlay ||
+      event.button !== 0 ||
+      !state.settings.enabled ||
+      !(event.target instanceof Element) ||
+      !event.target.closest('.btc-sub-line')
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const overlayRect = state.subtitleOverlay.getBoundingClientRect();
+    const rootRect = state.overlay.getBoundingClientRect();
+    const nextPosition = clampSubtitleOverlayPosition(
+      overlayRect.left - rootRect.left,
+      overlayRect.top - rootRect.top,
+      overlayRect.width,
+      overlayRect.height
+    );
+
+    state.subtitleOverlayPosition = nextPosition;
+    state.subtitleDrag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - overlayRect.left,
+      offsetY: event.clientY - overlayRect.top,
+      width: overlayRect.width,
+      height: overlayRect.height,
+    };
+    state.subtitleOverlay.classList.add('btc-dragging');
+    state.subtitleOverlay.setPointerCapture(event.pointerId);
+    applySubtitleOverlayPosition(nextPosition);
+  }
+
+  function handleSubtitleOverlayPointerMove(event) {
+    if (!state.subtitleDrag || event.pointerId !== state.subtitleDrag.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const rootRect = state.overlay.getBoundingClientRect();
+    const nextPosition = clampSubtitleOverlayPosition(
+      event.clientX - rootRect.left - state.subtitleDrag.offsetX,
+      event.clientY - rootRect.top - state.subtitleDrag.offsetY,
+      state.subtitleDrag.width,
+      state.subtitleDrag.height
+    );
+
+    state.subtitleOverlayPosition = nextPosition;
+    applySubtitleOverlayPosition(nextPosition);
+  }
+
+  function handleSubtitleOverlayPointerEnd(event) {
+    if (!state.subtitleDrag || event.pointerId !== state.subtitleDrag.pointerId) {
+      return;
+    }
+
+    if (state.subtitleOverlay?.hasPointerCapture(event.pointerId)) {
+      state.subtitleOverlay.releasePointerCapture(event.pointerId);
+    }
+    state.subtitleOverlay?.classList.remove('btc-dragging');
+    state.subtitleDrag = null;
+    syncSubtitleOverlayPosition();
+  }
+
+  function clampSubtitleOverlayPosition(left, top, width, height) {
+    const rootRect = state.overlay.getBoundingClientRect();
+    const maxLeft = Math.max(0, rootRect.width - width);
+    const maxTop = Math.max(0, rootRect.height - height);
+    return {
+      left: Math.min(Math.max(0, left), maxLeft),
+      top: Math.min(Math.max(0, top), maxTop),
+    };
+  }
+
+  function applySubtitleOverlayPosition(position) {
+    if (!state.subtitleOverlay) {
+      return;
+    }
+    if (!position) {
+      state.subtitleOverlay.style.left = '';
+      state.subtitleOverlay.style.top = '';
+      state.subtitleOverlay.style.bottom = '';
+      state.subtitleOverlay.style.transform = '';
+      return;
+    }
+
+    state.subtitleOverlay.style.left = `${position.left}px`;
+    state.subtitleOverlay.style.top = `${position.top}px`;
+    state.subtitleOverlay.style.bottom = 'auto';
+    state.subtitleOverlay.style.transform = 'none';
+  }
+
+  function syncSubtitleOverlayPosition() {
+    if (!state.subtitleOverlayPosition || !state.subtitleOverlay) {
+      return;
+    }
+    const rect = state.subtitleOverlay.getBoundingClientRect();
+    state.subtitleOverlayPosition = clampSubtitleOverlayPosition(
+      state.subtitleOverlayPosition.left,
+      state.subtitleOverlayPosition.top,
+      rect.width,
+      rect.height
+    );
+    applySubtitleOverlayPosition(state.subtitleOverlayPosition);
   }
 
   async function refreshTracks(resetDefaults) {
@@ -680,7 +805,7 @@
 
   function renderSubtitles() {
     const enabled = state.settings.enabled !== false;
-    const overlayBox = state.overlay.querySelector('#btc-bilingual-overlay');
+    const overlayBox = state.subtitleOverlay;
     overlayBox.classList.toggle('btc-hidden', !enabled);
     if (!enabled) {
       state.primaryLine.textContent = '';
@@ -697,6 +822,7 @@
     state.secondaryLine.textContent = secondaryText || '';
     state.primaryLine.style.display = primaryText ? 'inline-block' : 'none';
     state.secondaryLine.style.display = secondaryText ? 'inline-block' : 'none';
+    syncSubtitleOverlayPosition();
   }
 
   function resolveTrack(id) {
