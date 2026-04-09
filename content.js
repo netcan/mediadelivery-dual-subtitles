@@ -539,10 +539,10 @@
       toggleManagedVideoPlayback();
       handled = true;
     } else if (event.code === 'ArrowLeft' || event.key === 'ArrowLeft') {
-      seekManagedVideoBy(-10);
+      seekManagedVideoBy(-5);
       handled = true;
     } else if (event.code === 'ArrowRight' || event.key === 'ArrowRight') {
-      seekManagedVideoBy(10);
+      seekManagedVideoBy(5);
       handled = true;
     }
 
