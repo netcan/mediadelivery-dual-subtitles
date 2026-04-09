@@ -67,6 +67,7 @@
     dubbedMediaCache: new Map(),
     dubbedMediaWindow: new Set(),
     savedVideoAudioState: null,
+    keyboardHandler: null,
   };
 
   const style = document.createElement('style');
@@ -308,6 +309,10 @@
     });
     document.addEventListener('fullscreenchange', syncOverlayMount);
     document.addEventListener('webkitfullscreenchange', syncOverlayMount);
+    if (!state.keyboardHandler) {
+      state.keyboardHandler = handleFullscreenKeyboardShortcut;
+      document.addEventListener('keydown', state.keyboardHandler, true);
+    }
 
     state.renderTimer = window.setInterval(() => {
       void refreshTracks(false);
@@ -509,6 +514,85 @@
 
   function getFullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function isManagedVideoFullscreen() {
+    const fullscreenElement = getFullscreenElement();
+    return Boolean(fullscreenElement && state.video && fullscreenElement.contains(state.video));
+  }
+
+  function handleFullscreenKeyboardShortcut(event) {
+    if (
+      !state.video ||
+      !isManagedVideoFullscreen() ||
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      isIgnoredShortcutTarget(event.target)
+    ) {
+      return;
+    }
+
+    let handled = false;
+    if (event.code === 'Space' || event.key === ' ') {
+      toggleManagedVideoPlayback();
+      handled = true;
+    } else if (event.code === 'ArrowLeft' || event.key === 'ArrowLeft') {
+      seekManagedVideoBy(-10);
+      handled = true;
+    } else if (event.code === 'ArrowRight' || event.key === 'ArrowRight') {
+      seekManagedVideoBy(10);
+      handled = true;
+    }
+
+    if (!handled) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') {
+      event.stopImmediatePropagation();
+    }
+  }
+
+  function isIgnoredShortcutTarget(target) {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    if (target.isContentEditable) {
+      return true;
+    }
+    if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]')) {
+      return true;
+    }
+    return Boolean(target.closest('#btc-bilingual-panel, #btc-bilingual-toggle'));
+  }
+
+  function toggleManagedVideoPlayback() {
+    if (!state.video) {
+      return;
+    }
+    if (state.video.paused || state.video.ended) {
+      void state.video.play().catch(() => {});
+      return;
+    }
+    state.video.pause();
+  }
+
+  function seekManagedVideoBy(deltaSeconds) {
+    if (!state.video) {
+      return;
+    }
+    const duration = Number.isFinite(state.video.duration) ? state.video.duration : Number.POSITIVE_INFINITY;
+    const nextTime = Math.min(Math.max(0, state.video.currentTime + deltaSeconds), duration);
+    if (Math.abs(nextTime - state.video.currentTime) < 0.01) {
+      return;
+    }
+    state.video.currentTime = nextTime;
+    renderSubtitles();
+    syncDubbedAudioDrift();
   }
 
   function getOverlayMountTarget() {
