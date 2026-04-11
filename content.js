@@ -13,6 +13,8 @@
   const DUB_POLL_INTERVAL_MS = 3000;
   const DUB_SYNC_INTERVAL_MS = 900;
   const DUB_SYNC_THRESHOLD_SEC = 0.35;
+  const RESUME_SAVE_INTERVAL_MS = 5000;
+  const RESUME_NEAR_END_THRESHOLD_SEC = 10;
 
   const DEFAULT_PROVIDER = {
     type: 'custom',
@@ -71,6 +73,9 @@
     keyboardHandler: null,
     subtitleOverlayPosition: null,
     subtitleDrag: null,
+    resumeLifecycleBound: false,
+    resumeRestoreAttempted: false,
+    lastResumeSaveAt: 0,
   };
 
   const style = document.createElement('style');
@@ -298,12 +303,16 @@
     syncOverlayMount();
     void refreshTracks(true);
     void restorePersistedDubbing();
+    state.resumeRestoreAttempted = false;
+    state.lastResumeSaveAt = 0;
 
     video.addEventListener('loadedmetadata', () => {
+      maybeRestorePlaybackPosition();
       void refreshTracks(true);
       void syncDubbingPlayback(true);
     });
     video.addEventListener('seeked', () => {
+      persistPlaybackPosition(true);
       renderSubtitles();
       void syncDubbingPlayback(true);
     });
@@ -311,18 +320,31 @@
       renderSubtitles();
       void syncDubbingPlayback(false);
     });
-    video.addEventListener('pause', () => void syncDubbingPlayback(false));
+    video.addEventListener('pause', () => {
+      persistPlaybackPosition(true);
+      void syncDubbingPlayback(false);
+    });
     video.addEventListener('ratechange', () => void syncDubbingPlayback(true));
     video.addEventListener('ended', () => void syncDubbingPlayback(true));
     video.addEventListener('timeupdate', () => {
       renderSubtitles();
       syncDubbedAudioDrift();
+      persistPlaybackPosition(false);
     });
     document.addEventListener('fullscreenchange', syncOverlayMount);
     document.addEventListener('webkitfullscreenchange', syncOverlayMount);
     if (!state.keyboardHandler) {
       state.keyboardHandler = handleFullscreenKeyboardShortcut;
       document.addEventListener('keydown', state.keyboardHandler, true);
+    }
+    if (!state.resumeLifecycleBound) {
+      state.resumeLifecycleBound = true;
+      document.addEventListener('visibilitychange', handleResumeLifecyclePersist);
+      window.addEventListener('pagehide', handleResumeLifecyclePersist);
+      window.addEventListener('beforeunload', handleResumeLifecyclePersist);
+    }
+    if (video.readyState >= 1) {
+      maybeRestorePlaybackPosition();
     }
 
     state.renderTimer = window.setInterval(() => {
@@ -737,6 +759,93 @@
       rect.height
     );
     applySubtitleOverlayPosition(state.subtitleOverlayPosition);
+  }
+
+  function handleResumeLifecyclePersist(event) {
+    if (document.visibilityState === 'hidden' || event?.type !== 'visibilitychange') {
+      persistPlaybackPosition(true);
+    }
+  }
+
+  function getPlaybackResumeKey() {
+    if (!state.video) {
+      return '';
+    }
+    const pathKey = location.pathname || '';
+    const sourceKey = state.video.currentSrc || state.video.src || '';
+    return [location.origin, pathKey, sourceKey].filter(Boolean).join('::');
+  }
+
+  function getPlaybackResumeEntry() {
+    const key = getPlaybackResumeKey();
+    if (!key) {
+      return null;
+    }
+    return state.settings.resume?.[key] || null;
+  }
+
+  function persistPlaybackPosition(forceSave) {
+    if (!state.video) {
+      return;
+    }
+    const key = getPlaybackResumeKey();
+    if (!key) {
+      return;
+    }
+
+    const now = Date.now();
+    if (!forceSave && now - state.lastResumeSaveAt < RESUME_SAVE_INTERVAL_MS) {
+      return;
+    }
+
+    if (!state.settings.resume || typeof state.settings.resume !== 'object') {
+      state.settings.resume = {};
+    }
+
+    const currentTime = Math.max(0, state.video.currentTime || 0);
+    if (currentTime < 1) {
+      delete state.settings.resume[key];
+    } else {
+      state.settings.resume[key] = {
+        currentTime,
+        updatedAt: now,
+        duration: Number.isFinite(state.video.duration) ? state.video.duration : 0,
+      };
+    }
+
+    state.lastResumeSaveAt = now;
+    saveSettings();
+  }
+
+  function maybeRestorePlaybackPosition() {
+    if (!state.video || state.resumeRestoreAttempted || !Number.isFinite(state.video.duration) || state.video.duration <= 0) {
+      return;
+    }
+    state.resumeRestoreAttempted = true;
+
+    const entry = getPlaybackResumeEntry();
+    if (!entry || !isValidPlaybackResumeEntry(entry, state.video.duration)) {
+      return;
+    }
+
+    const targetTime = Math.max(0, Math.min(entry.currentTime, state.video.duration));
+    if (targetTime <= 0) {
+      return;
+    }
+    state.video.currentTime = targetTime;
+    renderSubtitles();
+    void syncDubbingPlayback(true);
+  }
+
+  function isValidPlaybackResumeEntry(entry, duration) {
+    if (!entry || typeof entry !== 'object') {
+      return false;
+    }
+    const currentTime = Number(entry.currentTime);
+    if (!Number.isFinite(currentTime) || currentTime < 0 || currentTime > duration) {
+      return false;
+    }
+    return duration - currentTime > RESUME_NEAR_END_THRESHOLD_SEC;
   }
 
   async function refreshTracks(resetDefaults) {
@@ -2127,6 +2236,7 @@
       secondary: typeof parsed.secondary === 'string' ? parsed.secondary : '',
       provider,
       dubbing: normalizeDubbing(parsed.dubbing, provider.baseUrl),
+      resume: normalizePlaybackResume(parsed.resume),
     };
   }
 
@@ -2174,6 +2284,26 @@
       partial: result.partial === true,
       segments: [],
     };
+  }
+
+  function normalizePlaybackResume(resume) {
+    const next = resume && typeof resume === 'object' ? resume : {};
+    const normalized = {};
+    for (const [key, value] of Object.entries(next)) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const currentTime = Number(value.currentTime);
+      if (!Number.isFinite(currentTime) || currentTime < 0) {
+        continue;
+      }
+      normalized[key] = {
+        currentTime,
+        updatedAt: Number.isFinite(Number(value.updatedAt)) ? Number(value.updatedAt) : 0,
+        duration: Number.isFinite(Number(value.duration)) ? Number(value.duration) : 0,
+      };
+    }
+    return normalized;
   }
 
   function loadSettings() {
