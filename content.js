@@ -7,7 +7,7 @@
     return;
   }
 
-  const STORAGE_KEY = 'btc-bilingual-subtitles-settings';
+  const STORAGE_KEY = 'dualsub-extension-settings';
   const IMPORTED_TRACK_ID = 'imported-local';
   const DUBBED_TRACK_ID = 'dubbed-generated';
   const DUB_POLL_INTERVAL_MS = 3000;
@@ -80,7 +80,7 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    #btc-bilingual-root {
+    #dualsub-bilingual-root {
       position: fixed;
       inset: 0;
       pointer-events: none;
@@ -88,11 +88,11 @@
       font-family: Arial, sans-serif;
     }
 
-    #btc-bilingual-overlay.btc-hidden {
+    #dualsub-bilingual-overlay.dualsub-hidden {
       display: none;
     }
 
-    #btc-bilingual-overlay {
+    #dualsub-bilingual-overlay {
       position: absolute;
       left: 50%;
       bottom: 9%;
@@ -108,11 +108,11 @@
       user-select: none;
     }
 
-    #btc-bilingual-overlay.btc-dragging {
+    #dualsub-bilingual-overlay.dualsub-dragging {
       cursor: grabbing;
     }
 
-    .btc-sub-line {
+    .dualsub-sub-line {
       display: block;
       max-width: 100%;
       margin: 4px auto;
@@ -127,13 +127,13 @@
       font-weight: 600;
     }
 
-    .btc-sub-line.secondary {
+    .dualsub-sub-line.secondary {
       color: #7fd0ff;
       font-size: 24px;
       font-weight: 500;
     }
 
-    #btc-bilingual-toggle {
+    #dualsub-bilingual-toggle {
       position: fixed;
       top: 12px;
       right: 12px;
@@ -143,7 +143,7 @@
       pointer-events: auto;
     }
 
-    #btc-bilingual-toggle button {
+    #dualsub-bilingual-toggle button {
       border: 0;
       border-radius: 999px;
       padding: 8px 12px;
@@ -153,7 +153,7 @@
       cursor: pointer;
     }
 
-    #btc-bilingual-panel {
+    #dualsub-bilingual-panel {
       position: fixed;
       top: 56px;
       right: 12px;
@@ -170,20 +170,20 @@
       pointer-events: auto;
     }
 
-    #btc-bilingual-panel[hidden] {
+    #dualsub-bilingual-panel[hidden] {
       display: none;
     }
 
-    #btc-bilingual-panel label {
+    #dualsub-bilingual-panel label {
       display: block;
       margin: 10px 0 4px;
       color: #cfe0ff;
     }
 
-    #btc-bilingual-panel select,
-    #btc-bilingual-panel input[type="file"],
-    #btc-bilingual-panel input[type="text"],
-    #btc-bilingual-panel input[type="password"] {
+    #dualsub-bilingual-panel select,
+    #dualsub-bilingual-panel input[type="file"],
+    #dualsub-bilingual-panel input[type="text"],
+    #dualsub-bilingual-panel input[type="password"] {
       width: 100%;
       box-sizing: border-box;
       border: 1px solid rgba(127, 208, 255, 0.22);
@@ -193,11 +193,11 @@
       color: #fff;
     }
 
-    #btc-bilingual-panel input[type="checkbox"] {
+    #dualsub-bilingual-panel input[type="checkbox"] {
       margin-right: 8px;
     }
 
-    #btc-bilingual-panel .btc-row {
+    #dualsub-bilingual-panel .dualsub-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -205,26 +205,26 @@
       margin-bottom: 8px;
     }
 
-    #btc-bilingual-panel .btc-section {
+    #dualsub-bilingual-panel .dualsub-section {
       margin-top: 14px;
       padding-top: 12px;
       border-top: 1px solid rgba(127, 208, 255, 0.18);
     }
 
-    #btc-bilingual-panel .btc-section-title {
+    #dualsub-bilingual-panel .dualsub-section-title {
       margin-bottom: 8px;
       font-size: 13px;
       font-weight: 700;
       color: #fff;
     }
 
-    #btc-bilingual-panel .btc-actions {
+    #dualsub-bilingual-panel .dualsub-actions {
       display: flex;
       gap: 8px;
       margin-top: 10px;
     }
 
-    #btc-bilingual-panel .btc-actions button {
+    #dualsub-bilingual-panel .dualsub-actions button {
       flex: 1 1 0;
       border: 1px solid rgba(127, 208, 255, 0.22);
       border-radius: 8px;
@@ -234,12 +234,12 @@
       cursor: pointer;
     }
 
-    #btc-bilingual-panel .btc-actions button[disabled] {
+    #dualsub-bilingual-panel .dualsub-actions button[disabled] {
       cursor: not-allowed;
       opacity: 0.55;
     }
 
-    #btc-bilingual-panel .btc-status {
+    #dualsub-bilingual-panel .dualsub-status {
       margin-top: 10px;
       padding: 8px 10px;
       border-radius: 8px;
@@ -249,12 +249,12 @@
       word-break: break-word;
     }
 
-    #btc-bilingual-panel .btc-status.is-error {
+    #dualsub-bilingual-panel .dualsub-status.is-error {
       background: rgba(255, 77, 79, 0.14);
       color: #ffd0d0;
     }
 
-    #btc-bilingual-panel .btc-note {
+    #dualsub-bilingual-panel .dualsub-note {
       margin-top: 10px;
       color: #a9bddf;
       font-size: 12px;
@@ -363,83 +363,83 @@
     }
 
     const root = document.createElement('div');
-    root.id = 'btc-bilingual-root';
+    root.id = 'dualsub-bilingual-root';
     root.innerHTML = `
-      <div id="btc-bilingual-overlay">
-        <div class="btc-sub-line primary"></div>
-        <div class="btc-sub-line secondary"></div>
+      <div id="dualsub-bilingual-overlay">
+        <div class="dualsub-sub-line primary"></div>
+        <div class="dualsub-sub-line secondary"></div>
       </div>
-      <div id="btc-bilingual-toggle">
+      <div id="dualsub-bilingual-toggle">
         <button type="button">双语字幕</button>
       </div>
-      <div id="btc-bilingual-panel" hidden>
-        <div class="btc-row">
-          <label><input type="checkbox" id="btc-enabled">启用双语字幕</label>
+      <div id="dualsub-bilingual-panel" hidden>
+        <div class="dualsub-row">
+          <label><input type="checkbox" id="dualsub-enabled">启用双语字幕</label>
         </div>
-        <label for="btc-primary">主字幕</label>
-        <select id="btc-primary"></select>
-        <label for="btc-secondary">副字幕</label>
-        <select id="btc-secondary"></select>
-        <label for="btc-import">导入本地字幕（SRT / VTT）</label>
-        <input id="btc-import" type="file" accept=".srt,.vtt,text/vtt,application/x-subrip">
-        <div class="btc-note">默认优先选择 English + Chinese。若站点没给中文轨，可导入你自己的中文字幕文件。</div>
+        <label for="dualsub-primary">主字幕</label>
+        <select id="dualsub-primary"></select>
+        <label for="dualsub-secondary">副字幕</label>
+        <select id="dualsub-secondary"></select>
+        <label for="dualsub-import">导入本地字幕（SRT / VTT）</label>
+        <input id="dualsub-import" type="file" accept=".srt,.vtt,text/vtt,application/x-subrip">
+        <div class="dualsub-note">默认优先选择 English + Chinese。若站点没给中文轨，可导入你自己的中文字幕文件。</div>
 
-        <div class="btc-section">
-          <div class="btc-section-title">Python Provider</div>
-          <label for="btc-provider-base-url">Provider 地址</label>
-          <input id="btc-provider-base-url" type="text" placeholder="例如 http://127.0.0.1:8000">
-          <label for="btc-provider-api-key">API Key / Token（可选）</label>
-          <input id="btc-provider-api-key" type="password" placeholder="远端 Provider 需要时再填写">
-          <div class="btc-actions">
-            <button type="button" id="btc-provider-refresh-voices">读取音色</button>
+        <div class="dualsub-section">
+          <div class="dualsub-section-title">Python Provider</div>
+          <label for="dualsub-provider-base-url">Provider 地址</label>
+          <input id="dualsub-provider-base-url" type="text" placeholder="例如 http://127.0.0.1:8000">
+          <label for="dualsub-provider-api-key">API Key / Token（可选）</label>
+          <input id="dualsub-provider-api-key" type="password" placeholder="远端 Provider 需要时再填写">
+          <div class="dualsub-actions">
+            <button type="button" id="dualsub-provider-refresh-voices">读取音色</button>
           </div>
-          <label for="btc-provider-voice-preset">音色</label>
-          <select id="btc-provider-voice-preset">
+          <label for="dualsub-provider-voice-preset">音色</label>
+          <select id="dualsub-provider-voice-preset">
             <option value="">跟随 Provider 默认音色</option>
           </select>
-          <div id="btc-provider-capabilities-note" class="btc-note">模型和推理参数由 Provider 管理；前端只配置地址并选择音色。</div>
+          <div id="dualsub-provider-capabilities-note" class="dualsub-note">模型和推理参数由 Provider 管理；前端只配置地址并选择音色。</div>
         </div>
 
-        <div class="btc-section">
-          <div class="btc-section-title">中文配音</div>
-          <div class="btc-row">
-            <label><input type="checkbox" id="btc-dubbing-enabled">启用中文配音</label>
+        <div class="dualsub-section">
+          <div class="dualsub-section-title">中文配音</div>
+          <div class="dualsub-row">
+            <label><input type="checkbox" id="dualsub-dubbing-enabled">启用中文配音</label>
           </div>
-          <label for="btc-dubbing-subtitle-mode">中文字幕来源</label>
-          <select id="btc-dubbing-subtitle-mode">
+          <label for="dualsub-dubbing-subtitle-mode">中文字幕来源</label>
+          <select id="dualsub-dubbing-subtitle-mode">
             <option value="original">优先原中文字幕</option>
             <option value="generated">优先配音结果字幕</option>
           </select>
-          <div class="btc-actions">
-            <button type="button" id="btc-dubbing-generate">生成中文配音</button>
-            <button type="button" id="btc-dubbing-refresh">刷新状态</button>
+          <div class="dualsub-actions">
+            <button type="button" id="dualsub-dubbing-generate">生成中文配音</button>
+            <button type="button" id="dualsub-dubbing-refresh">刷新状态</button>
           </div>
-          <div id="btc-dubbing-status" class="btc-status">尚未生成中文配音。</div>
-          <div class="btc-note">首期使用现有中文字幕驱动配音生成；ASR 作为后续扩展预留。</div>
+          <div id="dualsub-dubbing-status" class="dualsub-status">尚未生成中文配音。</div>
+          <div class="dualsub-note">首期使用现有中文字幕驱动配音生成；ASR 作为后续扩展预留。</div>
         </div>
       </div>
     `;
 
     getOverlayMountTarget().appendChild(root);
     state.overlay = root;
-    state.subtitleOverlay = root.querySelector('#btc-bilingual-overlay');
-    state.primaryLine = root.querySelector('.btc-sub-line.primary');
-    state.secondaryLine = root.querySelector('.btc-sub-line.secondary');
-    state.panel = root.querySelector('#btc-bilingual-panel');
-    state.primarySelect = root.querySelector('#btc-primary');
-    state.secondarySelect = root.querySelector('#btc-secondary');
-    state.enabledCheckbox = root.querySelector('#btc-enabled');
-    state.importInput = root.querySelector('#btc-import');
-    state.providerBaseUrlInput = root.querySelector('#btc-provider-base-url');
-    state.providerApiKeyInput = root.querySelector('#btc-provider-api-key');
-    state.providerVoicePresetSelect = root.querySelector('#btc-provider-voice-preset');
-    state.providerVoiceRefreshButton = root.querySelector('#btc-provider-refresh-voices');
-    state.providerCapabilitiesNote = root.querySelector('#btc-provider-capabilities-note');
-    state.dubbingEnabledCheckbox = root.querySelector('#btc-dubbing-enabled');
-    state.dubbingSubtitleModeSelect = root.querySelector('#btc-dubbing-subtitle-mode');
-    state.dubbingGenerateButton = root.querySelector('#btc-dubbing-generate');
-    state.dubbingRefreshButton = root.querySelector('#btc-dubbing-refresh');
-    state.dubbingStatus = root.querySelector('#btc-dubbing-status');
+    state.subtitleOverlay = root.querySelector('#dualsub-bilingual-overlay');
+    state.primaryLine = root.querySelector('.dualsub-sub-line.primary');
+    state.secondaryLine = root.querySelector('.dualsub-sub-line.secondary');
+    state.panel = root.querySelector('#dualsub-bilingual-panel');
+    state.primarySelect = root.querySelector('#dualsub-primary');
+    state.secondarySelect = root.querySelector('#dualsub-secondary');
+    state.enabledCheckbox = root.querySelector('#dualsub-enabled');
+    state.importInput = root.querySelector('#dualsub-import');
+    state.providerBaseUrlInput = root.querySelector('#dualsub-provider-base-url');
+    state.providerApiKeyInput = root.querySelector('#dualsub-provider-api-key');
+    state.providerVoicePresetSelect = root.querySelector('#dualsub-provider-voice-preset');
+    state.providerVoiceRefreshButton = root.querySelector('#dualsub-provider-refresh-voices');
+    state.providerCapabilitiesNote = root.querySelector('#dualsub-provider-capabilities-note');
+    state.dubbingEnabledCheckbox = root.querySelector('#dualsub-dubbing-enabled');
+    state.dubbingSubtitleModeSelect = root.querySelector('#dualsub-dubbing-subtitle-mode');
+    state.dubbingGenerateButton = root.querySelector('#dualsub-dubbing-generate');
+    state.dubbingRefreshButton = root.querySelector('#dualsub-dubbing-refresh');
+    state.dubbingStatus = root.querySelector('#dualsub-dubbing-status');
     state.subtitleOverlay.addEventListener('pointerdown', handleSubtitleOverlayPointerDown);
     state.subtitleOverlay.addEventListener('pointermove', handleSubtitleOverlayPointerMove);
     state.subtitleOverlay.addEventListener('pointerup', handleSubtitleOverlayPointerEnd);
@@ -605,7 +605,7 @@
     if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]')) {
       return true;
     }
-    return Boolean(target.closest('#btc-bilingual-panel, #btc-bilingual-toggle'));
+    return Boolean(target.closest('#dualsub-bilingual-panel, #dualsub-bilingual-toggle'));
   }
 
   function toggleManagedVideoPlayback() {
@@ -659,7 +659,7 @@
       event.button !== 0 ||
       !state.settings.enabled ||
       !(event.target instanceof Element) ||
-      !event.target.closest('.btc-sub-line')
+      !event.target.closest('.dualsub-sub-line')
     ) {
       return;
     }
@@ -683,7 +683,7 @@
       width: overlayRect.width,
       height: overlayRect.height,
     };
-    state.subtitleOverlay.classList.add('btc-dragging');
+    state.subtitleOverlay.classList.add('dualsub-dragging');
     state.subtitleOverlay.setPointerCapture(event.pointerId);
     applySubtitleOverlayPosition(nextPosition);
   }
@@ -714,7 +714,7 @@
     if (state.subtitleOverlay?.hasPointerCapture(event.pointerId)) {
       state.subtitleOverlay.releasePointerCapture(event.pointerId);
     }
-    state.subtitleOverlay?.classList.remove('btc-dragging');
+    state.subtitleOverlay?.classList.remove('dualsub-dragging');
     state.subtitleDrag = null;
     syncSubtitleOverlayPosition();
   }
@@ -915,7 +915,7 @@
   function renderSubtitles() {
     const enabled = state.settings.enabled !== false;
     const overlayBox = state.subtitleOverlay;
-    overlayBox.classList.toggle('btc-hidden', !enabled);
+    overlayBox.classList.toggle('dualsub-hidden', !enabled);
     if (!enabled) {
       state.primaryLine.textContent = '';
       state.secondaryLine.textContent = '';
@@ -1025,7 +1025,7 @@
         };
       }
     } catch (error) {
-      console.debug('btc bilingual: failed to load track', src, error);
+      console.debug('dualsub: failed to load track', src, error);
     }
 
     return {
@@ -1543,7 +1543,7 @@
       };
       await refreshTracks(false);
     } catch (error) {
-      console.debug('btc bilingual: failed to load dubbed subtitle track', error);
+      console.debug('dualsub: failed to load dubbed subtitle track', error);
     }
   }
 
@@ -2168,7 +2168,7 @@
     try {
       audio.currentTime = Math.max(0, currentTime);
     } catch {
-      console.debug('btc bilingual: unable to seek dubbed audio');
+      console.debug('dualsub: unable to seek dubbed audio');
     }
   }
 
@@ -2202,18 +2202,18 @@
     if (!state.video || !audioState) {
       return;
     }
-    state.video.dataset.btcOriginalMuted = audioState.muted ? 'true' : 'false';
-    state.video.dataset.btcOriginalVolume = String(audioState.volume);
-    state.video.dataset.btcDubbingManaged = 'true';
+    state.video.dataset.dualsubOriginalMuted = audioState.muted ? 'true' : 'false';
+    state.video.dataset.dualsubOriginalVolume = String(audioState.volume);
+    state.video.dataset.dualsubDubbingManaged = 'true';
   }
 
   function readPersistedOriginalVideoAudioState() {
-    if (!state.video || state.video.dataset.btcDubbingManaged !== 'true') {
+    if (!state.video || state.video.dataset.dualsubDubbingManaged !== 'true') {
       return null;
     }
-    const parsedVolume = Number.parseFloat(state.video.dataset.btcOriginalVolume || '1');
+    const parsedVolume = Number.parseFloat(state.video.dataset.dualsubOriginalVolume || '1');
     return {
-      muted: state.video.dataset.btcOriginalMuted === 'true',
+      muted: state.video.dataset.dualsubOriginalMuted === 'true',
       volume: Number.isFinite(parsedVolume) ? parsedVolume : 1,
     };
   }
@@ -2222,9 +2222,9 @@
     if (!state.video) {
       return;
     }
-    delete state.video.dataset.btcOriginalMuted;
-    delete state.video.dataset.btcOriginalVolume;
-    delete state.video.dataset.btcDubbingManaged;
+    delete state.video.dataset.dualsubOriginalMuted;
+    delete state.video.dataset.dualsubOriginalVolume;
+    delete state.video.dataset.dualsubDubbingManaged;
   }
 
   function normalizeSettings(raw) {
