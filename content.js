@@ -768,12 +768,7 @@
   }
 
   function getPlaybackResumeKey() {
-    if (!state.video) {
-      return '';
-    }
-    const pathKey = location.pathname || '';
-    const sourceKey = state.video.currentSrc || state.video.src || '';
-    return [location.origin, pathKey, sourceKey].filter(Boolean).join('::');
+    return [location.origin, location.pathname || ''].filter(Boolean).join('::');
   }
 
   function getPlaybackResumeEntry() {
@@ -781,7 +776,13 @@
     if (!key) {
       return null;
     }
-    return state.settings.resume?.[key] || null;
+    const resume = state.settings.resume || {};
+    if (resume[key]) {
+      return resume[key];
+    }
+    return Object.entries(resume)
+      .filter(([itemKey]) => itemKey.startsWith(`${key}::`))
+      .sort(([, first], [, second]) => (Number(second?.updatedAt) || 0) - (Number(first?.updatedAt) || 0))[0]?.[1] || null;
   }
 
   function persistPlaybackPosition(forceSave) {
