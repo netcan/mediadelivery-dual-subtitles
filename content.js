@@ -1094,7 +1094,7 @@
     }
 
     const currentTime = state.video?.currentTime || 0;
-    const nextIndex = state.subtitleTimelineEntries.findIndex((entry) => entry.start <= currentTime && currentTime < entry.end);
+    const nextIndex = findSubtitleTimelineEntryIndex(currentTime);
     if (nextIndex === state.activeSubtitleTimelineIndex) {
       return;
     }
@@ -1110,6 +1110,48 @@
       const active = state.subtitleTimelineList.querySelector(`[data-timeline-index="${nextIndex}"]`);
       active?.classList.add('is-active');
       active?.setAttribute('aria-current', 'true');
+      ensureSubtitleTimelineItemVisible(active);
+    }
+  }
+
+  function findSubtitleTimelineEntryIndex(currentTime) {
+    const entries = state.subtitleTimelineEntries;
+    if (!entries.length) {
+      return -1;
+    }
+
+    let left = 0;
+    let right = entries.length - 1;
+    let matchIndex = -1;
+
+    while (left <= right) {
+      const middle = Math.floor((left + right) / 2);
+      if (entries[middle].start <= currentTime) {
+        matchIndex = middle;
+        left = middle + 1;
+      } else {
+        right = middle - 1;
+      }
+    }
+
+    return matchIndex;
+  }
+
+  function ensureSubtitleTimelineItemVisible(item) {
+    if (!item || !state.subtitleTimelineList || state.panel?.hidden || state.video?.paused) {
+      return;
+    }
+
+    const container = state.subtitleTimelineList;
+    const containerRect = container.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+
+    if (itemRect.top < containerRect.top) {
+      container.scrollTop -= containerRect.top - itemRect.top;
+      return;
+    }
+    if (itemRect.bottom > containerRect.bottom) {
+      container.scrollTop += itemRect.bottom - containerRect.bottom;
     }
   }
 
@@ -1785,21 +1827,30 @@
     }
 
     if (track.kind === 'imported' || track.kind === 'native-parsed') {
-      return track.cues.map((cue) => ({
+      return sortCuesByTime(track.cues.map((cue) => ({
         start: cue.start,
         end: cue.end,
         text: cue.text,
-      }));
+      })));
     }
 
     const cues = Array.from(track.track?.cues || []);
-    return cues
-      .map((cue) => ({
+    return sortCuesByTime(
+      cues.map((cue) => ({
         start: cue.startTime,
         end: cue.endTime,
         text: normalizeCueText(cue.text),
       }))
-      .filter((cue) => cue.text);
+    ).filter((cue) => cue.text);
+  }
+
+  function sortCuesByTime(cues) {
+    return [...cues].sort((left, right) => {
+      if (left.start !== right.start) {
+        return left.start - right.start;
+      }
+      return left.end - right.end;
+    });
   }
 
   function buildProviderHeaders(provider) {
