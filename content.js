@@ -44,6 +44,8 @@
     panel: null,
     primarySelect: null,
     secondarySelect: null,
+    subtitleTimelineList: null,
+    subtitleTimelineEmpty: null,
     enabledCheckbox: null,
     importInput: null,
     providerBaseUrlInput: null,
@@ -73,6 +75,8 @@
     keyboardHandler: null,
     subtitleOverlayPosition: null,
     subtitleDrag: null,
+    subtitleTimelineEntries: [],
+    activeSubtitleTimelineIndex: -1,
     resumeLifecycleBound: false,
     resumeRestoreAttempted: false,
     lastResumeSaveAt: 0,
@@ -260,6 +264,60 @@
       font-size: 12px;
     }
 
+    #dualsub-bilingual-panel .dualsub-timeline {
+      margin-top: 8px;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid rgba(127, 208, 255, 0.14);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-item {
+      display: block;
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid rgba(127, 208, 255, 0.08);
+      padding: 8px 10px;
+      background: transparent;
+      color: #fff;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-item:last-child {
+      border-bottom: 0;
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-item.is-active {
+      background: rgba(127, 208, 255, 0.16);
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-item:hover {
+      background: rgba(127, 208, 255, 0.1);
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-time {
+      display: block;
+      margin-bottom: 4px;
+      color: #7fd0ff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-primary,
+    #dualsub-bilingual-panel .dualsub-timeline-secondary {
+      display: block;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    #dualsub-bilingual-panel .dualsub-timeline-secondary {
+      margin-top: 4px;
+      color: #cfe0ff;
+      font-size: 12px;
+    }
+
     .plyr__captions {
       display: none !important;
     }
@@ -385,6 +443,12 @@
         <div class="dualsub-note">默认优先选择 English + Chinese。若站点没给中文轨，可导入你自己的中文字幕文件。</div>
 
         <div class="dualsub-section">
+          <div class="dualsub-section-title">字幕时间轴</div>
+          <div id="dualsub-timeline" class="dualsub-timeline" role="listbox" aria-label="字幕时间轴"></div>
+          <div id="dualsub-timeline-empty" class="dualsub-note">当前主字幕暂无可导航的时间轴内容。</div>
+        </div>
+
+        <div class="dualsub-section">
           <div class="dualsub-section-title">Python Provider</div>
           <label for="dualsub-provider-base-url">Provider 地址</label>
           <input id="dualsub-provider-base-url" type="text" placeholder="例如 http://127.0.0.1:8000">
@@ -428,6 +492,8 @@
     state.panel = root.querySelector('#dualsub-bilingual-panel');
     state.primarySelect = root.querySelector('#dualsub-primary');
     state.secondarySelect = root.querySelector('#dualsub-secondary');
+    state.subtitleTimelineList = root.querySelector('#dualsub-timeline');
+    state.subtitleTimelineEmpty = root.querySelector('#dualsub-timeline-empty');
     state.enabledCheckbox = root.querySelector('#dualsub-enabled');
     state.importInput = root.querySelector('#dualsub-import');
     state.providerBaseUrlInput = root.querySelector('#dualsub-provider-base-url');
@@ -444,6 +510,7 @@
     state.subtitleOverlay.addEventListener('pointermove', handleSubtitleOverlayPointerMove);
     state.subtitleOverlay.addEventListener('pointerup', handleSubtitleOverlayPointerEnd);
     state.subtitleOverlay.addEventListener('pointercancel', handleSubtitleOverlayPointerEnd);
+    state.subtitleTimelineList.addEventListener('click', handleSubtitleTimelineClick);
 
     root.querySelector('button').addEventListener('click', () => {
       state.panel.hidden = !state.panel.hidden;
@@ -882,6 +949,7 @@
     renderOptions(combined);
     saveSettings();
     renderSubtitles();
+    refreshSubtitleTimeline(true);
     refreshDubbingControls();
   }
 
@@ -933,6 +1001,127 @@
     state.primaryLine.style.display = primaryText ? 'inline-block' : 'none';
     state.secondaryLine.style.display = secondaryText ? 'inline-block' : 'none';
     syncSubtitleOverlayPosition();
+    refreshSubtitleTimeline(false);
+  }
+
+  function handleSubtitleTimelineClick(event) {
+    const item = event.target instanceof Element ? event.target.closest('.dualsub-timeline-item') : null;
+    if (!item || !state.video) {
+      return;
+    }
+    const index = Number(item.dataset.timelineIndex);
+    const entry = state.subtitleTimelineEntries[index];
+    if (!entry) {
+      return;
+    }
+    state.video.currentTime = entry.start;
+    refreshSubtitleTimeline(false);
+  }
+
+  function refreshSubtitleTimeline(rebuild) {
+    if (!state.subtitleTimelineList || !state.subtitleTimelineEmpty) {
+      return;
+    }
+    if (rebuild) {
+      state.subtitleTimelineEntries = buildSubtitleTimelineEntries();
+      renderSubtitleTimelineEntries();
+    }
+    updateActiveSubtitleTimelineItem();
+  }
+
+  function buildSubtitleTimelineEntries() {
+    const primaryTrack = resolveTrack(state.settings.primary);
+    if (!primaryTrack) {
+      return [];
+    }
+    const primaryCues = getTrackCues(primaryTrack).filter((cue) => cue.text);
+    const secondaryTrack = resolveTrack(state.settings.secondary);
+    const secondaryCues =
+      secondaryTrack && secondaryTrack.id !== primaryTrack.id ? getTrackCues(secondaryTrack).filter((cue) => cue.text) : [];
+
+    return primaryCues.map((cue, index) => ({
+      index,
+      start: cue.start,
+      end: cue.end,
+      primaryText: cue.text,
+      secondaryText: matchSecondaryTimelineText(secondaryCues, cue),
+    }));
+  }
+
+  function matchSecondaryTimelineText(secondaryCues, primaryCue) {
+    if (!secondaryCues.length) {
+      return '';
+    }
+    const overlapping = secondaryCues.filter((cue) => cue.start < primaryCue.end && primaryCue.start < cue.end);
+    if (overlapping.length) {
+      return compactCueSegments(overlapping.map((cue) => cue.text));
+    }
+
+    const nearest = secondaryCues.find((cue) => Math.abs(cue.start - primaryCue.start) < 0.35);
+    return nearest?.text || '';
+  }
+
+  function renderSubtitleTimelineEntries() {
+    if (!state.subtitleTimelineList || !state.subtitleTimelineEmpty) {
+      return;
+    }
+    const entries = state.subtitleTimelineEntries;
+    state.subtitleTimelineEmpty.hidden = entries.length > 0;
+    if (!entries.length) {
+      state.subtitleTimelineList.innerHTML = '';
+      state.activeSubtitleTimelineIndex = -1;
+      return;
+    }
+
+    state.subtitleTimelineList.innerHTML = entries
+      .map(
+        (entry) => `
+          <button type="button" class="dualsub-timeline-item" data-timeline-index="${entry.index}">
+            <span class="dualsub-timeline-time">${escapeHtml(formatTimelineTime(entry.start))}</span>
+            <span class="dualsub-timeline-primary">${escapeHtml(entry.primaryText)}</span>
+            ${entry.secondaryText ? `<span class="dualsub-timeline-secondary">${escapeHtml(entry.secondaryText)}</span>` : ''}
+          </button>
+        `
+      )
+      .join('');
+    state.activeSubtitleTimelineIndex = -1;
+  }
+
+  function updateActiveSubtitleTimelineItem() {
+    if (!state.subtitleTimelineEntries.length || !state.subtitleTimelineList) {
+      state.activeSubtitleTimelineIndex = -1;
+      return;
+    }
+
+    const currentTime = state.video?.currentTime || 0;
+    const nextIndex = state.subtitleTimelineEntries.findIndex((entry) => entry.start <= currentTime && currentTime < entry.end);
+    if (nextIndex === state.activeSubtitleTimelineIndex) {
+      return;
+    }
+
+    if (state.activeSubtitleTimelineIndex >= 0) {
+      const previous = state.subtitleTimelineList.querySelector(`[data-timeline-index="${state.activeSubtitleTimelineIndex}"]`);
+      previous?.classList.remove('is-active');
+      previous?.removeAttribute('aria-current');
+    }
+
+    state.activeSubtitleTimelineIndex = nextIndex;
+    if (nextIndex >= 0) {
+      const active = state.subtitleTimelineList.querySelector(`[data-timeline-index="${nextIndex}"]`);
+      active?.classList.add('is-active');
+      active?.setAttribute('aria-current', 'true');
+    }
+  }
+
+  function formatTimelineTime(value) {
+    const totalSeconds = Math.max(0, Math.floor(Number(value) || 0));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   }
 
   function resolveTrack(id) {
