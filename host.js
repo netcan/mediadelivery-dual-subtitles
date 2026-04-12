@@ -13,6 +13,7 @@
   const DEFAULT_HEIGHT = 360;
   const MIN_WIDTH = 320;
   const MIN_HEIGHT = 180;
+  const MAX_SHARE_EXPORT_HEIGHT = 12000;
   const records = [];
   let observer = null;
 
@@ -158,6 +159,16 @@
         background: rgba(127, 208, 255, 0.16);
       }
 
+      .dualsub-host-item.is-selected {
+        background: rgba(127, 208, 255, 0.12);
+        box-shadow: inset 0 0 0 1px rgba(127, 208, 255, 0.42);
+      }
+
+      .dualsub-host-item.is-active.is-selected {
+        background: rgba(127, 208, 255, 0.22);
+        box-shadow: inset 0 0 0 1px rgba(127, 208, 255, 0.75);
+      }
+
       .dualsub-host-item:hover {
         background: rgba(127, 208, 255, 0.1);
       }
@@ -219,6 +230,8 @@
           <h3 class="dualsub-host-title">字幕时间轴</h3>
           <div class="dualsub-host-actions">
             <button type="button" class="dualsub-host-button dualsub-host-locate">定位当前</button>
+            <button type="button" class="dualsub-host-button dualsub-host-clear" disabled>清空选择</button>
+            <button type="button" class="dualsub-host-button dualsub-host-share" disabled>复制图片</button>
             <button type="button" class="dualsub-host-button dualsub-host-toggle" aria-expanded="true">折叠</button>
           </div>
         </div>
@@ -241,12 +254,16 @@
       list: host.querySelector('.dualsub-host-list'),
       empty: host.querySelector('.dualsub-host-empty'),
       locateButton: host.querySelector('.dualsub-host-locate'),
+      clearButton: host.querySelector('.dualsub-host-clear'),
+      shareButton: host.querySelector('.dualsub-host-share'),
       toggleButton: host.querySelector('.dualsub-host-toggle'),
       resizeHandle: host.querySelector('.dualsub-host-resize'),
       entries: [],
       activeIndex: -1,
       paused: false,
       forceLocate: false,
+      selectedIndexes: new Set(),
+      selectionAnchorIndex: -1,
       drag: null,
       resize: null,
       state: loadRecordState(),
@@ -254,6 +271,10 @@
 
     record.list.addEventListener('click', (event) => handleTimelineClick(record, event));
     record.locateButton.addEventListener('click', () => locateCurrentTimelineItem(record));
+    record.clearButton.addEventListener('click', () => clearTimelineSelection(record));
+    record.shareButton.addEventListener('click', () => {
+      void copyTimelineShareImage(record);
+    });
     record.toggleButton.addEventListener('click', () => toggleRecordCollapsed(record));
     record.heading.addEventListener('pointerdown', (event) => handleDragStart(record, event));
     record.resizeHandle.addEventListener('pointerdown', (event) => handleResizeStart(record, event));
@@ -293,6 +314,17 @@
       return;
     }
 
+    if (event.shiftKey) {
+      selectTimelineRange(record, index);
+      return;
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      toggleTimelineSelection(record, index);
+      return;
+    }
+
+    record.selectionAnchorIndex = index;
     record.iframe.contentWindow?.postMessage(
       {
         source: HOST_MESSAGE_SOURCE,
@@ -306,6 +338,34 @@
   function locateCurrentTimelineItem(record) {
     const active = record.list.querySelector(`.dualsub-host-item[data-timeline-index="${record.activeIndex}"]`);
     ensureTimelineItemVisible(record, active, true);
+  }
+
+  function toggleTimelineSelection(record, index) {
+    if (record.selectedIndexes.has(index)) {
+      record.selectedIndexes.delete(index);
+    } else {
+      record.selectedIndexes.add(index);
+    }
+    record.selectionAnchorIndex = index;
+    syncTimelineSelectionState(record);
+  }
+
+  function selectTimelineRange(record, index) {
+    const anchorIndex = record.selectionAnchorIndex >= 0 ? record.selectionAnchorIndex : index;
+    const start = Math.min(anchorIndex, index);
+    const end = Math.max(anchorIndex, index);
+    record.selectedIndexes.clear();
+    for (let current = start; current <= end; current += 1) {
+      record.selectedIndexes.add(current);
+    }
+    record.selectionAnchorIndex = anchorIndex;
+    syncTimelineSelectionState(record);
+  }
+
+  function clearTimelineSelection(record) {
+    record.selectedIndexes.clear();
+    record.selectionAnchorIndex = -1;
+    syncTimelineSelectionState(record);
   }
 
   function applyRecordState(record, index) {
@@ -454,10 +514,11 @@
   }
 
   function renderTimeline(record) {
+    pruneTimelineSelection(record);
     const markup = record.entries
       .map(
         (entry) => `
-          <button type="button" class="dualsub-host-item" data-timeline-index="${entry.index}">
+          <button type="button" class="dualsub-host-item${record.selectedIndexes.has(entry.index) ? ' is-selected' : ''}" data-timeline-index="${entry.index}">
             <span class="dualsub-host-time">${escapeHtml(formatTimelineTime(entry.start))}</span>
             <span class="dualsub-host-primary">${escapeHtml(entry.primaryText)}</span>
             ${entry.secondaryText ? `<span class="dualsub-host-secondary">${escapeHtml(entry.secondaryText)}</span>` : ''}
@@ -468,6 +529,7 @@
 
     record.list.innerHTML = markup;
     record.empty.hidden = record.entries.length > 0;
+    updateSelectionActionState(record);
     updateActiveTimelineItem(record);
   }
 
@@ -487,6 +549,183 @@
     active?.setAttribute('aria-current', 'true');
     ensureTimelineItemVisible(record, active, record.forceLocate);
     record.forceLocate = false;
+  }
+
+  function syncTimelineSelectionState(record) {
+    for (const item of Array.from(record.list.querySelectorAll('.dualsub-host-item'))) {
+      const index = Number(item.dataset.timelineIndex);
+      item.classList.toggle('is-selected', record.selectedIndexes.has(index));
+    }
+    updateSelectionActionState(record);
+  }
+
+  function updateSelectionActionState(record) {
+    const hasSelection = record.selectedIndexes.size > 0;
+    record.clearButton.disabled = !hasSelection;
+    record.shareButton.disabled = !hasSelection;
+  }
+
+  function pruneTimelineSelection(record) {
+    const validIndexes = new Set(record.entries.map((entry) => entry.index));
+    record.selectedIndexes = new Set([...record.selectedIndexes].filter((index) => validIndexes.has(index)));
+    if (!validIndexes.has(record.selectionAnchorIndex)) {
+      record.selectionAnchorIndex = -1;
+    }
+  }
+
+  async function copyTimelineShareImage(record) {
+    const selectedEntries = record.entries.filter((entry) => record.selectedIndexes.has(entry.index));
+    if (!selectedEntries.length) {
+      updateSelectionActionState(record);
+      return;
+    }
+
+    const renderResult = renderShareImage(selectedEntries);
+    if (!renderResult.ok) {
+      window.alert(renderResult.message);
+      return;
+    }
+
+    const blob = await canvasToBlob(renderResult.canvas);
+    if (!blob) {
+      window.alert('分享图片生成失败，请稍后重试。');
+      return;
+    }
+
+    if (!navigator.clipboard?.write || typeof ClipboardItem !== 'function') {
+      window.alert('当前浏览器不支持复制图片到剪贴板。');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [blob.type || 'image/png']: blob,
+        }),
+      ]);
+      flashShareButtonSuccess(record);
+    } catch (error) {
+      console.debug('dualsub: failed to copy share image', error);
+      window.alert('复制图片失败，请确认当前页面允许访问剪贴板。');
+    }
+  }
+
+  function renderShareImage(entries) {
+    const pagePadding = 28;
+    const cardPadding = 22;
+    const headerTopInset = 8;
+    const titleMetaGap = 6;
+    const headerGap = 18;
+    const blockPaddingY = 18;
+    const blockInnerGap = 8;
+    const blockGap = 16;
+    const footerGap = 20;
+    const width = 1120;
+    const contentWidth = width - pagePadding * 2 - cardPadding * 2;
+    const titleFont = '700 34px Arial';
+    const metaFont = '500 20px Arial';
+    const timeFont = '700 22px Arial';
+    const primaryFont = '700 28px Arial';
+    const secondaryFont = '500 24px Arial';
+    const footerFont = '500 18px Arial';
+    const titleLineHeight = 42;
+    const metaLineHeight = 26;
+    const timeLineHeight = 28;
+    const primaryLineHeight = 34;
+    const secondaryLineHeight = 30;
+    const footerLineHeight = 22;
+
+    const measureCanvas = document.createElement('canvas');
+    const measureContext = measureCanvas.getContext('2d');
+    if (!measureContext) {
+      return { ok: false, message: '浏览器当前环境不支持图片导出。' };
+    }
+
+    const metaLines = wrapCanvasText(measureContext, document.title || location.href, metaFont, contentWidth);
+    const blocks = entries.map((entry) => {
+      const timeLines = wrapCanvasText(measureContext, formatTimelineTime(entry.start), timeFont, contentWidth);
+      const primaryLines = wrapCanvasText(measureContext, entry.primaryText, primaryFont, contentWidth);
+      const secondaryLines = wrapCanvasText(measureContext, entry.secondaryText || '', secondaryFont, contentWidth);
+      const timeHeight = timeLines.length * timeLineHeight;
+      const primaryHeight = primaryLines.length * primaryLineHeight;
+      const secondaryHeight = secondaryLines.length ? secondaryLines.length * secondaryLineHeight : 0;
+      const contentHeight =
+        timeHeight +
+        blockInnerGap +
+        primaryHeight +
+        (secondaryHeight ? blockInnerGap + secondaryHeight : 0);
+      const height = blockPaddingY * 2 + contentHeight;
+      return { timeLines, primaryLines, secondaryLines, height };
+    });
+
+    const headerHeight =
+      headerTopInset +
+      metaLines.length * metaLineHeight;
+    const blocksHeight = blocks.reduce((sum, block, index) => sum + block.height + (index > 0 ? blockGap : 0), 0);
+    const totalHeight =
+      pagePadding * 2 +
+      cardPadding * 2 +
+      headerHeight +
+      headerGap +
+      blocksHeight +
+      footerGap +
+      footerLineHeight;
+
+    if (totalHeight > MAX_SHARE_EXPORT_HEIGHT) {
+      return { ok: false, message: '选中的字幕内容过多，请减少后再分享。' };
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = Math.max(420, Math.ceil(totalHeight));
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return { ok: false, message: '浏览器当前环境不支持图片导出。' };
+    }
+
+    context.fillStyle = '#08111d';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawRoundedRect(context, pagePadding, pagePadding, width - pagePadding * 2, canvas.height - pagePadding * 2, 24, '#0f1c2d');
+    drawRoundedRect(context, pagePadding + 1, pagePadding + 1, width - pagePadding * 2 - 2, canvas.height - pagePadding * 2 - 2, 24);
+    context.strokeStyle = 'rgba(127, 208, 255, 0.22)';
+    context.lineWidth = 2;
+    context.stroke();
+
+    let cursorY = pagePadding + cardPadding + headerTopInset;
+    cursorY = drawCanvasLines(context, metaLines, pagePadding + cardPadding, cursorY, metaLineHeight, metaFont, '#a9bddf');
+    cursorY += headerGap;
+
+    blocks.forEach((block, index) => {
+      if (index > 0) {
+        cursorY += blockGap;
+      }
+      drawRoundedRect(
+        context,
+        pagePadding + cardPadding - 8,
+        cursorY,
+        contentWidth + 16,
+        block.height,
+        16,
+        'rgba(127, 208, 255, 0.08)'
+      );
+      let blockCursorY = cursorY + blockPaddingY;
+      blockCursorY = drawCanvasLines(context, block.timeLines, pagePadding + cardPadding + 6, blockCursorY, timeLineHeight, timeFont, '#7fd0ff');
+      blockCursorY += blockInnerGap;
+      blockCursorY = drawCanvasLines(context, block.primaryLines, pagePadding + cardPadding + 6, blockCursorY, primaryLineHeight, primaryFont, '#ffffff');
+      if (block.secondaryLines.length) {
+        blockCursorY += blockInnerGap;
+        blockCursorY = drawCanvasLines(context, block.secondaryLines, pagePadding + cardPadding + 6, blockCursorY, secondaryLineHeight, secondaryFont, '#cfe0ff');
+      }
+      cursorY += block.height;
+    });
+
+    context.font = footerFont;
+    context.fillStyle = '#7f8fa8';
+    context.textBaseline = 'top';
+    context.fillText('Generated by MediaDelivery Dual Subtitles', pagePadding + cardPadding, cursorY + footerGap);
+
+    return { ok: true, canvas };
   }
 
   function ensureTimelineItemVisible(record, item, force) {
@@ -590,6 +829,82 @@
       height: clamp(Number(state.height) || DEFAULT_HEIGHT, MIN_HEIGHT, Math.max(MIN_HEIGHT, window.innerHeight - 16)),
       collapsed: state.collapsed === true,
     };
+  }
+
+  function wrapCanvasText(context, text, font, maxWidth) {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+      return [];
+    }
+
+    context.font = font;
+    const segments = normalized.split(/\r?\n/);
+    const lines = [];
+
+    for (const segment of segments) {
+      let currentLine = '';
+      for (const char of segment) {
+        const nextLine = currentLine + char;
+        if (currentLine && context.measureText(nextLine).width > maxWidth) {
+          lines.push(currentLine);
+          currentLine = char;
+        } else {
+          currentLine = nextLine;
+        }
+      }
+      if (currentLine) {
+        lines.push(currentLine);
+      } else if (!segment) {
+        lines.push('');
+      }
+    }
+
+    return lines;
+  }
+
+  function drawCanvasLines(context, lines, x, startY, lineHeight, font, color) {
+    context.font = font;
+    context.fillStyle = color;
+    context.textBaseline = 'top';
+    let cursorY = startY;
+    for (const line of lines) {
+      context.fillText(line, x, cursorY);
+      cursorY += lineHeight;
+    }
+    return cursorY;
+  }
+
+  function drawRoundedRect(context, x, y, width, height, radius, fillStyle) {
+    context.beginPath();
+    context.moveTo(x + radius, y);
+    context.arcTo(x + width, y, x + width, y + height, radius);
+    context.arcTo(x + width, y + height, x, y + height, radius);
+    context.arcTo(x, y + height, x, y, radius);
+    context.arcTo(x, y, x + width, y, radius);
+    context.closePath();
+    if (fillStyle) {
+      context.fillStyle = fillStyle;
+      context.fill();
+    }
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
+
+  function flashShareButtonSuccess(record) {
+    if (!record?.shareButton) {
+      return;
+    }
+    const originalText = record.shareButton.textContent || '复制图片';
+    record.shareButton.textContent = '已复制';
+    record.shareButton.disabled = true;
+    window.setTimeout(() => {
+      record.shareButton.textContent = originalText;
+      updateSelectionActionState(record);
+    }, 1200);
   }
 
   function clamp(value, min, max) {
