@@ -1,0 +1,42 @@
+# playback-position-resume Specification
+
+## Purpose
+TBD - created by archiving change remember-video-playback-position. Update Purpose after archive.
+## Requirements
+### Requirement: 插件必须按视频记录播放位置
+系统 MUST 能按视频维度记录当前播放位置，并在播放过程中持续更新该记录。
+
+#### Scenario: 播放过程中记录进度
+- **WHEN** 用户正在观看当前视频且播放位置发生变化
+- **THEN** 系统 MUST 按节流策略保存该视频的最新播放时间点
+
+#### Scenario: 暂停或离开前补充保存
+- **WHEN** 用户暂停视频、刷新页面或离开当前页面
+- **THEN** 系统 MUST 在可用时机补充保存该视频最近的播放位置
+
+### Requirement: 插件必须在刷新后恢复当前视频的播放位置
+系统 MUST 在同一视频重新加载后恢复到上次记录的播放点，但 MUST NOT 自动开始播放。
+
+#### Scenario: 刷新后恢复播放点
+- **WHEN** 当前视频重新加载且存在有效的历史播放位置
+- **THEN** 系统 MUST 在元数据可用后将视频定位到该播放点，并保持暂停状态
+
+#### Scenario: 没有历史记录时正常从头开始
+- **WHEN** 当前视频不存在有效的历史播放位置
+- **THEN** 系统 MUST 保持默认播放起点，而不是构造虚假的恢复位置
+
+### Requirement: 插件必须过滤无效或不适合恢复的播放记录
+系统 MUST 在恢复前校验记录的有效性，并忽略无效时间点或接近视频结尾的记录。
+
+#### Scenario: 记录超出视频范围
+- **WHEN** 历史记录时间点大于当前视频时长、为负数或不可解析
+- **THEN** 系统 MUST 忽略该记录，不执行恢复
+
+#### Scenario: 记录接近视频结尾
+- **WHEN** 历史记录距离当前视频结束只剩很短时间
+- **THEN** 系统 MUST 忽略该记录，避免刷新后默认停在结尾附近
+
+#### Scenario: 中文配音启用时恢复播放点
+- **WHEN** 用户启用了中文配音，且系统恢复了当前视频的播放位置
+- **THEN** 系统 MUST 继续通过既有的视频同步链路保持字幕与中文配音状态一致
+
