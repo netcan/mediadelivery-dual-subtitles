@@ -46,6 +46,7 @@
     secondarySelect: null,
     subtitleTimelineList: null,
     subtitleTimelineEmpty: null,
+    subtitleTimelineLocateButton: null,
     enabledCheckbox: null,
     importInput: null,
     providerBaseUrlInput: null,
@@ -77,6 +78,7 @@
     subtitleDrag: null,
     subtitleTimelineEntries: [],
     activeSubtitleTimelineIndex: -1,
+    pendingTimelineLocate: false,
     resumeLifecycleBound: false,
     resumeRestoreAttempted: false,
     lastResumeSaveAt: 0,
@@ -220,6 +222,32 @@
       font-size: 13px;
       font-weight: 700;
       color: #fff;
+    }
+
+    #dualsub-bilingual-panel .dualsub-section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    #dualsub-bilingual-panel .dualsub-section-heading .dualsub-section-title {
+      margin-bottom: 0;
+    }
+
+    #dualsub-bilingual-panel .dualsub-small-button {
+      border: 1px solid rgba(127, 208, 255, 0.22);
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: rgba(127, 208, 255, 0.12);
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    #dualsub-bilingual-panel .dualsub-small-button:hover {
+      background: rgba(127, 208, 255, 0.2);
     }
 
     #dualsub-bilingual-panel .dualsub-actions {
@@ -443,7 +471,10 @@
         <div class="dualsub-note">默认优先选择 English + Chinese。若站点没给中文轨，可导入你自己的中文字幕文件。</div>
 
         <div class="dualsub-section">
-          <div class="dualsub-section-title">字幕时间轴</div>
+          <div class="dualsub-section-heading">
+            <div class="dualsub-section-title">字幕时间轴</div>
+            <button type="button" id="dualsub-timeline-locate" class="dualsub-small-button">定位当前</button>
+          </div>
           <div id="dualsub-timeline" class="dualsub-timeline" role="listbox" aria-label="字幕时间轴"></div>
           <div id="dualsub-timeline-empty" class="dualsub-note">当前主字幕暂无可导航的时间轴内容。</div>
         </div>
@@ -494,6 +525,7 @@
     state.secondarySelect = root.querySelector('#dualsub-secondary');
     state.subtitleTimelineList = root.querySelector('#dualsub-timeline');
     state.subtitleTimelineEmpty = root.querySelector('#dualsub-timeline-empty');
+    state.subtitleTimelineLocateButton = root.querySelector('#dualsub-timeline-locate');
     state.enabledCheckbox = root.querySelector('#dualsub-enabled');
     state.importInput = root.querySelector('#dualsub-import');
     state.providerBaseUrlInput = root.querySelector('#dualsub-provider-base-url');
@@ -511,9 +543,13 @@
     state.subtitleOverlay.addEventListener('pointerup', handleSubtitleOverlayPointerEnd);
     state.subtitleOverlay.addEventListener('pointercancel', handleSubtitleOverlayPointerEnd);
     state.subtitleTimelineList.addEventListener('click', handleSubtitleTimelineClick);
+    state.subtitleTimelineLocateButton.addEventListener('click', locateCurrentSubtitleTimelineItem);
 
     root.querySelector('button').addEventListener('click', () => {
       state.panel.hidden = !state.panel.hidden;
+      if (!state.panel.hidden && state.pendingTimelineLocate) {
+        locateCurrentSubtitleTimelineItem();
+      }
     });
 
     state.enabledCheckbox.addEventListener('change', () => {
@@ -900,6 +936,7 @@
     if (targetTime <= 0) {
       return;
     }
+    state.pendingTimelineLocate = true;
     state.video.currentTime = targetTime;
     renderSubtitles();
     void syncDubbingPlayback(true);
@@ -1018,6 +1055,27 @@
     refreshSubtitleTimeline(false);
   }
 
+  function locateCurrentSubtitleTimelineItem() {
+    if (!state.subtitleTimelineList || !state.video) {
+      return;
+    }
+    if (!state.subtitleTimelineEntries.length) {
+      refreshSubtitleTimeline(true);
+    } else {
+      refreshSubtitleTimeline(false);
+    }
+
+    const index = findSubtitleTimelineEntryIndex(state.video.currentTime || 0);
+    if (index < 0) {
+      return;
+    }
+    if (index !== state.activeSubtitleTimelineIndex) {
+      updateActiveSubtitleTimelineItem();
+    }
+    const active = state.subtitleTimelineList.querySelector(`[data-timeline-index="${index}"]`);
+    ensureSubtitleTimelineItemVisible(active, true);
+  }
+
   function refreshSubtitleTimeline(rebuild) {
     if (!state.subtitleTimelineList || !state.subtitleTimelineEmpty) {
       return;
@@ -1110,7 +1168,10 @@
       const active = state.subtitleTimelineList.querySelector(`[data-timeline-index="${nextIndex}"]`);
       active?.classList.add('is-active');
       active?.setAttribute('aria-current', 'true');
-      ensureSubtitleTimelineItemVisible(active);
+      const ensured = ensureSubtitleTimelineItemVisible(active, state.pendingTimelineLocate);
+      if (state.pendingTimelineLocate && ensured) {
+        state.pendingTimelineLocate = false;
+      }
     }
   }
 
@@ -1137,9 +1198,9 @@
     return matchIndex;
   }
 
-  function ensureSubtitleTimelineItemVisible(item) {
-    if (!item || !state.subtitleTimelineList || state.panel?.hidden || state.video?.paused) {
-      return;
+  function ensureSubtitleTimelineItemVisible(item, force = false) {
+    if (!item || !state.subtitleTimelineList || state.panel?.hidden || (!force && state.video?.paused)) {
+      return false;
     }
 
     const container = state.subtitleTimelineList;
@@ -1148,11 +1209,13 @@
 
     if (itemRect.top < containerRect.top) {
       container.scrollTop -= containerRect.top - itemRect.top;
-      return;
+      return true;
     }
     if (itemRect.bottom > containerRect.bottom) {
       container.scrollTop += itemRect.bottom - containerRect.bottom;
+      return true;
     }
+    return true;
   }
 
   function formatTimelineTime(value) {
@@ -1182,14 +1245,20 @@
       return getImportedText(item.cues, state.video.currentTime);
     }
 
+    const cues = item.track?.cues ? Array.from(item.track.cues) : [];
+    if (cues.length) {
+      const currentCues = cues.filter((cue) => cue.startTime <= state.video.currentTime && state.video.currentTime < cue.endTime);
+      if (currentCues.length) {
+        return compactCueSegments(currentCues.map((cue) => normalizeCueText(cue.text)));
+      }
+    }
+
     const activeCues = item.track?.activeCues ? Array.from(item.track.activeCues) : [];
     if (activeCues.length) {
       return compactCueSegments(activeCues.map((cue) => normalizeCueText(cue.text)));
     }
 
-    const cues = item.track?.cues ? Array.from(item.track.cues) : [];
-    const currentCue = cues.find((cue) => cue.startTime <= state.video.currentTime && state.video.currentTime < cue.endTime);
-    return currentCue ? normalizeCueText(currentCue.text) : '';
+    return '';
   }
 
   async function loadNativeTracks() {
