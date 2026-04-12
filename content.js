@@ -10,6 +10,8 @@
   const STORAGE_KEY = 'dualsub-extension-settings';
   const IMPORTED_TRACK_ID = 'imported-local';
   const DUBBED_TRACK_ID = 'dubbed-generated';
+  const EMBED_MESSAGE_SOURCE = 'dualsub-embed';
+  const HOST_MESSAGE_SOURCE = 'dualsub-host';
   const DUB_POLL_INTERVAL_MS = 3000;
   const DUB_SYNC_INTERVAL_MS = 900;
   const DUB_SYNC_THRESHOLD_SEC = 0.35;
@@ -79,6 +81,8 @@
     subtitleTimelineEntries: [],
     activeSubtitleTimelineIndex: -1,
     pendingTimelineLocate: false,
+    pendingResumeTime: null,
+    pendingResumeTimer: null,
     resumeLifecycleBound: false,
     resumeRestoreAttempted: false,
     lastResumeSaveAt: 0,
@@ -397,7 +401,11 @@
       void refreshTracks(true);
       void syncDubbingPlayback(true);
     });
+    video.addEventListener('loadeddata', () => {
+      ensurePendingPlaybackResume();
+    });
     video.addEventListener('seeked', () => {
+      finalizePendingPlaybackResume();
       persistPlaybackPosition(true);
       renderSubtitles();
       void syncDubbingPlayback(true);
@@ -429,6 +437,7 @@
       window.addEventListener('pagehide', handleResumeLifecyclePersist);
       window.addEventListener('beforeunload', handleResumeLifecyclePersist);
     }
+    window.addEventListener('message', handleHostTimelineMessage);
     if (video.readyState >= 1) {
       maybeRestorePlaybackPosition();
     }
@@ -538,6 +547,7 @@
     state.dubbingGenerateButton = root.querySelector('#dualsub-dubbing-generate');
     state.dubbingRefreshButton = root.querySelector('#dualsub-dubbing-refresh');
     state.dubbingStatus = root.querySelector('#dualsub-dubbing-status');
+
     state.subtitleOverlay.addEventListener('pointerdown', handleSubtitleOverlayPointerDown);
     state.subtitleOverlay.addEventListener('pointermove', handleSubtitleOverlayPointerMove);
     state.subtitleOverlay.addEventListener('pointerup', handleSubtitleOverlayPointerEnd);
@@ -937,9 +947,55 @@
       return;
     }
     state.pendingTimelineLocate = true;
-    state.video.currentTime = targetTime;
+    state.pendingResumeTime = targetTime;
+    ensurePendingPlaybackResume(true);
+  }
+
+  function ensurePendingPlaybackResume(forceSeek = false) {
+    if (!state.video || !Number.isFinite(state.pendingResumeTime)) {
+      return;
+    }
+
+    const targetTime = Number(state.pendingResumeTime);
+    if (forceSeek || Math.abs((state.video.currentTime || 0) - targetTime) > 0.2) {
+      state.video.currentTime = targetTime;
+    }
+
     renderSubtitles();
+    refreshSubtitleTimeline(false);
     void syncDubbingPlayback(true);
+    schedulePendingPlaybackResumeCheck();
+  }
+
+  function schedulePendingPlaybackResumeCheck() {
+    if (!state.video || !Number.isFinite(state.pendingResumeTime)) {
+      return;
+    }
+    if (state.pendingResumeTimer) {
+      window.clearTimeout(state.pendingResumeTimer);
+    }
+    state.pendingResumeTimer = window.setTimeout(() => {
+      state.pendingResumeTimer = null;
+      if (!state.video || !Number.isFinite(state.pendingResumeTime)) {
+        return;
+      }
+      if (Math.abs((state.video.currentTime || 0) - Number(state.pendingResumeTime)) <= 0.2) {
+        finalizePendingPlaybackResume();
+        return;
+      }
+      ensurePendingPlaybackResume(true);
+    }, 250);
+  }
+
+  function finalizePendingPlaybackResume() {
+    if (!Number.isFinite(state.pendingResumeTime)) {
+      return;
+    }
+    if (state.pendingResumeTimer) {
+      window.clearTimeout(state.pendingResumeTimer);
+      state.pendingResumeTimer = null;
+    }
+    state.pendingResumeTime = null;
   }
 
   function isValidPlaybackResumeEntry(entry, duration) {
@@ -1055,8 +1111,41 @@
     refreshSubtitleTimeline(false);
   }
 
+  function handleHostTimelineMessage(event) {
+    if (!event.data || event.data.source !== HOST_MESSAGE_SOURCE || event.source !== window.parent) {
+      return;
+    }
+    if (event.data.type !== 'timeline-seek' || !state.video) {
+      return;
+    }
+
+    const nextTime = Number(event.data.currentTime);
+    if (!Number.isFinite(nextTime) || nextTime < 0) {
+      return;
+    }
+
+    state.video.currentTime = nextTime;
+    renderSubtitles();
+    syncDubbedAudioDrift();
+  }
+
+  function getSubtitleTimelineViews() {
+    return [
+      {
+        type: 'panel',
+        list: state.subtitleTimelineList,
+        empty: state.subtitleTimelineEmpty,
+        isVisible: () => Boolean(state.subtitleTimelineList && !state.panel?.hidden),
+      },
+    ].filter((view) => view.list && view.empty);
+  }
+
   function locateCurrentSubtitleTimelineItem() {
-    if (!state.subtitleTimelineList || !state.video) {
+    locateCurrentSubtitleTimelineItemInView(null);
+  }
+
+  function locateCurrentSubtitleTimelineItemInView(preferredType) {
+    if (!state.video) {
       return;
     }
     if (!state.subtitleTimelineEntries.length) {
@@ -1072,19 +1161,30 @@
     if (index !== state.activeSubtitleTimelineIndex) {
       updateActiveSubtitleTimelineItem();
     }
-    const active = state.subtitleTimelineList.querySelector(`[data-timeline-index="${index}"]`);
-    ensureSubtitleTimelineItemVisible(active, true);
+
+    const preferredView = getSubtitleTimelineViews().find((view) => view.type === preferredType && view.isVisible());
+    const fallbackView = getSubtitleTimelineViews().find((view) => view.isVisible());
+    const targetView = preferredView || fallbackView;
+    if (!targetView) {
+      return;
+    }
+
+    const active = targetView.list.querySelector(`[data-timeline-index="${index}"]`);
+    ensureSubtitleTimelineItemVisible(targetView, active, true);
   }
 
   function refreshSubtitleTimeline(rebuild) {
-    if (!state.subtitleTimelineList || !state.subtitleTimelineEmpty) {
+    const views = getSubtitleTimelineViews();
+    if (!views.length) {
+      postTimelineStateToHost();
       return;
     }
     if (rebuild) {
       state.subtitleTimelineEntries = buildSubtitleTimelineEntries();
-      renderSubtitleTimelineEntries();
+      renderSubtitleTimelineEntries(views);
     }
     updateActiveSubtitleTimelineItem();
+    postTimelineStateToHost();
   }
 
   function buildSubtitleTimelineEntries() {
@@ -1119,19 +1219,9 @@
     return nearest?.text || '';
   }
 
-  function renderSubtitleTimelineEntries() {
-    if (!state.subtitleTimelineList || !state.subtitleTimelineEmpty) {
-      return;
-    }
+  function renderSubtitleTimelineEntries(views = getSubtitleTimelineViews()) {
     const entries = state.subtitleTimelineEntries;
-    state.subtitleTimelineEmpty.hidden = entries.length > 0;
-    if (!entries.length) {
-      state.subtitleTimelineList.innerHTML = '';
-      state.activeSubtitleTimelineIndex = -1;
-      return;
-    }
-
-    state.subtitleTimelineList.innerHTML = entries
+    const markup = entries
       .map(
         (entry) => `
           <button type="button" class="dualsub-timeline-item" data-timeline-index="${entry.index}">
@@ -1142,11 +1232,18 @@
         `
       )
       .join('');
+
+    for (const view of views) {
+      view.empty.hidden = entries.length > 0;
+      view.list.innerHTML = entries.length ? markup : '';
+    }
+
     state.activeSubtitleTimelineIndex = -1;
   }
 
   function updateActiveSubtitleTimelineItem() {
-    if (!state.subtitleTimelineEntries.length || !state.subtitleTimelineList) {
+    const views = getSubtitleTimelineViews();
+    if (!state.subtitleTimelineEntries.length || !views.length) {
       state.activeSubtitleTimelineIndex = -1;
       return;
     }
@@ -1158,20 +1255,25 @@
     }
 
     if (state.activeSubtitleTimelineIndex >= 0) {
-      const previous = state.subtitleTimelineList.querySelector(`[data-timeline-index="${state.activeSubtitleTimelineIndex}"]`);
-      previous?.classList.remove('is-active');
-      previous?.removeAttribute('aria-current');
+      for (const view of views) {
+        const previous = view.list.querySelector(`[data-timeline-index="${state.activeSubtitleTimelineIndex}"]`);
+        previous?.classList.remove('is-active');
+        previous?.removeAttribute('aria-current');
+      }
     }
 
     state.activeSubtitleTimelineIndex = nextIndex;
+    let ensured = false;
     if (nextIndex >= 0) {
-      const active = state.subtitleTimelineList.querySelector(`[data-timeline-index="${nextIndex}"]`);
-      active?.classList.add('is-active');
-      active?.setAttribute('aria-current', 'true');
-      const ensured = ensureSubtitleTimelineItemVisible(active, state.pendingTimelineLocate);
-      if (state.pendingTimelineLocate && ensured) {
-        state.pendingTimelineLocate = false;
+      for (const view of views) {
+        const active = view.list.querySelector(`[data-timeline-index="${nextIndex}"]`);
+        active?.classList.add('is-active');
+        active?.setAttribute('aria-current', 'true');
+        ensured = ensureSubtitleTimelineItemVisible(view, active, state.pendingTimelineLocate) || ensured;
       }
+    }
+    if (state.pendingTimelineLocate && ensured) {
+      state.pendingTimelineLocate = false;
     }
   }
 
@@ -1198,12 +1300,12 @@
     return matchIndex;
   }
 
-  function ensureSubtitleTimelineItemVisible(item, force = false) {
-    if (!item || !state.subtitleTimelineList || state.panel?.hidden || (!force && state.video?.paused)) {
+  function ensureSubtitleTimelineItemVisible(view, item, force = false) {
+    if (!view?.list || !item || !view.isVisible() || (!force && state.video?.paused)) {
       return false;
     }
 
-    const container = state.subtitleTimelineList;
+    const container = view.list;
     const containerRect = container.getBoundingClientRect();
     const itemRect = item.getBoundingClientRect();
 
@@ -1216,6 +1318,24 @@
       return true;
     }
     return true;
+  }
+
+  function postTimelineStateToHost() {
+    if (window.parent === window) {
+      return;
+    }
+
+    window.parent.postMessage(
+      {
+        source: EMBED_MESSAGE_SOURCE,
+        type: 'timeline-state',
+        entries: state.subtitleTimelineEntries,
+        activeIndex: state.activeSubtitleTimelineIndex,
+        paused: state.video?.paused === true,
+        forceLocate: state.pendingTimelineLocate === true,
+      },
+      '*'
+    );
   }
 
   function formatTimelineTime(value) {
