@@ -30,7 +30,7 @@ TBD - created by archiving change add-below-video-subtitle-timeline. Update Purp
 - **THEN** 系统 MUST 将视频跳转到该字幕对应的时间点
 
 ### Requirement: External subtitle timeline supports manual browsing and current-position relocation
-系统 MUST 允许用户在宿主页悬浮字幕时间轴中手动滚动浏览字幕，同时提供回到当前播放位置、管理选中字幕和触发分享的快捷能力。
+系统 MUST 允许用户在宿主页悬浮字幕时间轴中手动滚动浏览字幕，同时提供回到当前播放位置、管理选中字幕、触发图片分享和导出 TXT 的快捷能力。
 
 #### Scenario: Paused playback does not interrupt manual browsing
 - **WHEN** 视频处于暂停状态且用户手动滚动外置时间轴
@@ -42,4 +42,4 @@ TBD - created by archiving change add-below-video-subtitle-timeline. Update Purp
 
 #### Scenario: User can access selection and sharing actions
 - **WHEN** 用户打开宿主页悬浮字幕时间轴窗口
-- **THEN** 系统 MUST 提供与字幕选择和分享相关的可见操作入口
+- **THEN** 系统 MUST 提供与字幕选择、图片分享和 TXT 导出相关的可见操作入口
