@@ -230,8 +230,10 @@
           <h3 class="dualsub-host-title">字幕时间轴</h3>
           <div class="dualsub-host-actions">
             <button type="button" class="dualsub-host-button dualsub-host-locate">定位当前</button>
+            <button type="button" class="dualsub-host-button dualsub-host-select-all" disabled>全选</button>
             <button type="button" class="dualsub-host-button dualsub-host-clear" disabled>清空选择</button>
             <button type="button" class="dualsub-host-button dualsub-host-share" disabled>复制图片</button>
+            <button type="button" class="dualsub-host-button dualsub-host-export" disabled>导出 TXT</button>
             <button type="button" class="dualsub-host-button dualsub-host-toggle" aria-expanded="true">折叠</button>
           </div>
         </div>
@@ -254,8 +256,10 @@
       list: host.querySelector('.dualsub-host-list'),
       empty: host.querySelector('.dualsub-host-empty'),
       locateButton: host.querySelector('.dualsub-host-locate'),
+      selectAllButton: host.querySelector('.dualsub-host-select-all'),
       clearButton: host.querySelector('.dualsub-host-clear'),
       shareButton: host.querySelector('.dualsub-host-share'),
+      exportButton: host.querySelector('.dualsub-host-export'),
       toggleButton: host.querySelector('.dualsub-host-toggle'),
       resizeHandle: host.querySelector('.dualsub-host-resize'),
       entries: [],
@@ -271,10 +275,12 @@
 
     record.list.addEventListener('click', (event) => handleTimelineClick(record, event));
     record.locateButton.addEventListener('click', () => locateCurrentTimelineItem(record));
+    record.selectAllButton.addEventListener('click', () => selectAllTimelineEntries(record));
     record.clearButton.addEventListener('click', () => clearTimelineSelection(record));
     record.shareButton.addEventListener('click', () => {
       void copyTimelineShareImage(record);
     });
+    record.exportButton.addEventListener('click', () => exportTimelineTxt(record));
     record.toggleButton.addEventListener('click', () => toggleRecordCollapsed(record));
     record.heading.addEventListener('pointerdown', (event) => handleDragStart(record, event));
     record.resizeHandle.addEventListener('pointerdown', (event) => handleResizeStart(record, event));
@@ -365,6 +371,16 @@
   function clearTimelineSelection(record) {
     record.selectedIndexes.clear();
     record.selectionAnchorIndex = -1;
+    syncTimelineSelectionState(record);
+  }
+
+  function selectAllTimelineEntries(record) {
+    if (!record.entries.length) {
+      updateSelectionActionState(record);
+      return;
+    }
+    record.selectedIndexes = new Set(record.entries.map((entry) => entry.index));
+    record.selectionAnchorIndex = record.entries[record.entries.length - 1]?.index ?? -1;
     syncTimelineSelectionState(record);
   }
 
@@ -561,8 +577,10 @@
 
   function updateSelectionActionState(record) {
     const hasSelection = record.selectedIndexes.size > 0;
+    record.selectAllButton.disabled = record.entries.length === 0;
     record.clearButton.disabled = !hasSelection;
     record.shareButton.disabled = !hasSelection;
+    record.exportButton.disabled = !hasSelection;
   }
 
   function pruneTimelineSelection(record) {
@@ -574,7 +592,7 @@
   }
 
   async function copyTimelineShareImage(record) {
-    const selectedEntries = record.entries.filter((entry) => record.selectedIndexes.has(entry.index));
+    const selectedEntries = getSelectedTimelineEntries(record);
     if (!selectedEntries.length) {
       updateSelectionActionState(record);
       return;
@@ -608,6 +626,59 @@
       console.debug('dualsub: failed to copy share image', error);
       window.alert('复制图片失败，请确认当前页面允许访问剪贴板。');
     }
+  }
+
+  function exportTimelineTxt(record) {
+    const selectedEntries = getSelectedTimelineEntries(record);
+    if (!selectedEntries.length) {
+      updateSelectionActionState(record);
+      return;
+    }
+
+    const content = buildTimelineTxtContent(selectedEntries);
+    if (!content) {
+      window.alert('当前选中的字幕没有可导出的文本内容。');
+      return;
+    }
+
+    const fileName = buildTimelineTxtFileName();
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, fileName);
+    flashExportButtonSuccess(record);
+  }
+
+  function getSelectedTimelineEntries(record) {
+    return record.entries.filter((entry) => record.selectedIndexes.has(entry.index));
+  }
+
+  function buildTimelineTxtContent(entries) {
+    return entries
+      .map((entry) => {
+        const lines = [entry.primaryText, entry.secondaryText]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean);
+        return lines.join('\n');
+      })
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  function buildTimelineTxtFileName() {
+    const title = sanitizeFileName(document.title || 'bilingual-subtitles');
+    const stamp = new Date().toISOString().slice(0, 19).replaceAll(':', '-');
+    return `${title}-${stamp}.txt`;
+  }
+
+  function downloadBlob(blob, fileName) {
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = fileName;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   }
 
   function renderShareImage(entries) {
@@ -905,6 +976,28 @@
       record.shareButton.textContent = originalText;
       updateSelectionActionState(record);
     }, 1200);
+  }
+
+  function flashExportButtonSuccess(record) {
+    if (!record?.exportButton) {
+      return;
+    }
+    const originalText = record.exportButton.textContent || '导出 TXT';
+    record.exportButton.textContent = '已导出';
+    record.exportButton.disabled = true;
+    window.setTimeout(() => {
+      record.exportButton.textContent = originalText;
+      updateSelectionActionState(record);
+    }, 1200);
+  }
+
+  function sanitizeFileName(value) {
+    return String(value || '')
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/-+/g, '-')
+      .slice(0, 80) || 'bilingual-subtitles';
   }
 
   function clamp(value, min, max) {
