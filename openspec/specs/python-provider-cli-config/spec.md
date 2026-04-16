@@ -1,3 +1,8 @@
+# python-provider-cli-config Specification
+
+## Purpose
+定义 Python Provider 的命令行启动配置能力，使用户可以通过 CLI 参数设置监听地址、端口和模型路径，并明确 CLI 参数相对环境变量的优先级。
+
 ## Requirements
 
 ### Requirement: Python provider 必须支持命令行参数配置

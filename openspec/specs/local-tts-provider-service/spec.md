@@ -1,3 +1,8 @@
+# local-tts-provider-service Specification
+
+## Purpose
+定义本地 TTS Provider 服务与浏览器扩展之间的任务接口、能力查询和结果返回契约，确保本地模型部署后能够被扩展稳定用于中文配音生成。
+
 ## Requirements
 
 ### Requirement: 本地 Provider 服务必须暴露扩展兼容的任务接口

@@ -1,3 +1,8 @@
+# model-provider-config Specification
+
+## Purpose
+定义扩展中模型 Provider 的配置能力，包括云端 API、自定义 HTTP 服务、本地服务和 OpenAI-compatible 接口的统一保存、校验与任务执行前检查。
+
 ## Requirements
 
 ### Requirement: 用户可以配置模型服务提供方

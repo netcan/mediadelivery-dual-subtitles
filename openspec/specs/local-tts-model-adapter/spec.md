@@ -1,3 +1,8 @@
+# local-tts-model-adapter Specification
+
+## Purpose
+定义 Python Provider 内部的本地 TTS 模型适配层，用于隔离模型加载、文本预处理和推理调用细节，并优先支持 VoxCPM 作为首期本地语音合成模型。
+
 ## Requirements
 
 ### Requirement: 系统必须支持本地 TTS 模型适配层

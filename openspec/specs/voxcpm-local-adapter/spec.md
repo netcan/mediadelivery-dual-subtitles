@@ -1,3 +1,8 @@
+# voxcpm-local-adapter Specification
+
+## Purpose
+定义 Python Provider 中 VoxCPM 原生 SDK 适配器的模型加载、推理参数、音色配置和错误处理要求，确保本地 VoxCPM 能稳定生成中文配音音频。
+
 ## Requirements
 
 ### Requirement: 系统必须支持 VoxCPM 原生 Python SDK 适配
