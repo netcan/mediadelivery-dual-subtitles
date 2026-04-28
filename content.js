@@ -1180,8 +1180,12 @@
       return;
     }
     if (rebuild) {
-      state.subtitleTimelineEntries = buildSubtitleTimelineEntries();
-      renderSubtitleTimelineEntries(views);
+      const nextEntries = buildSubtitleTimelineEntries();
+      const entriesChanged = !areSubtitleTimelineEntriesEqual(state.subtitleTimelineEntries, nextEntries);
+      state.subtitleTimelineEntries = nextEntries;
+      if (entriesChanged) {
+        renderSubtitleTimelineEntries(views);
+      }
     }
     updateActiveSubtitleTimelineItem();
     postTimelineStateToHost();
@@ -1239,6 +1243,29 @@
     }
 
     state.activeSubtitleTimelineIndex = -1;
+  }
+
+  function areSubtitleTimelineEntriesEqual(left, right) {
+    if (left === right) {
+      return true;
+    }
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      const leftEntry = left[index];
+      const rightEntry = right[index];
+      if (
+        leftEntry?.index !== rightEntry?.index ||
+        leftEntry?.start !== rightEntry?.start ||
+        leftEntry?.end !== rightEntry?.end ||
+        leftEntry?.primaryText !== rightEntry?.primaryText ||
+        leftEntry?.secondaryText !== rightEntry?.secondaryText
+      ) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function updateActiveSubtitleTimelineItem() {

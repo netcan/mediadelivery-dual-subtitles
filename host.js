@@ -299,11 +299,19 @@
     }
 
     if (event.data.type === 'timeline-state') {
-      record.entries = Array.isArray(event.data.entries) ? event.data.entries : [];
+      const nextEntries = Array.isArray(event.data.entries) ? event.data.entries : [];
+      const entriesChanged = !areTimelineEntriesEqual(record.entries, nextEntries);
+      record.entries = nextEntries;
       record.activeIndex = Number.isInteger(event.data.activeIndex) ? event.data.activeIndex : -1;
       record.paused = event.data.paused === true;
       record.forceLocate = event.data.forceLocate === true;
-      renderTimeline(record);
+      if (entriesChanged) {
+        renderTimeline(record);
+      } else {
+        pruneTimelineSelection(record);
+        updateSelectionActionState(record);
+        updateActiveTimelineItem(record);
+      }
       syncRecordVisibility();
     }
   }
@@ -547,6 +555,29 @@
     record.empty.hidden = record.entries.length > 0;
     updateSelectionActionState(record);
     updateActiveTimelineItem(record);
+  }
+
+  function areTimelineEntriesEqual(left, right) {
+    if (left === right) {
+      return true;
+    }
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      const leftEntry = left[index];
+      const rightEntry = right[index];
+      if (
+        leftEntry?.index !== rightEntry?.index ||
+        leftEntry?.start !== rightEntry?.start ||
+        leftEntry?.end !== rightEntry?.end ||
+        leftEntry?.primaryText !== rightEntry?.primaryText ||
+        leftEntry?.secondaryText !== rightEntry?.secondaryText
+      ) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function updateActiveTimelineItem(record) {
